@@ -4,13 +4,11 @@
 
 A desktop story reader for Hearts of Iron IV mods. Pick a country, read its national focuses and events, and choose branches as the story unfolds.
 
-## Screenshots
+## Home screen
 
-The screenshots use sample data to show the interface without distributing mod assets.
+The TFR-themed home screen uses sample data.
 
-| Country selection | Settings |
-| --- | --- |
-| ![Country selection in the TFR theme](docs/screenshots/tfr-countries.png) | ![Settings and language selection in the TFR theme](docs/screenshots/tfr-settings.png) |
+![Home screen in the TFR theme](docs/screenshots/tfr-home.png)
 
 ## Features
 

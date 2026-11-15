@@ -41,10 +41,12 @@ html[data-reader-theme='tfr'] app-root {
   }
 
   .topbar-title, .brand, .page-heading h1, .focus-choice-title, .country-name,
-  mat-card-title, .reader-heading h1, .country-flag, .eyebrow,
-  [matListItemTitle], .mdc-button__label, mat-label {
-    font-family: var(--tfr-display);
+  mat-card-title, .reader-heading h1, .country-flag, .eyebrow {
     font-weight: 400;
+  }
+
+  button, input, select, textarea, code, kbd {
+    font-family: var(--tfr-display);
   }
 
   .page-heading h1, .country-name, mat-card-title {
@@ -180,7 +182,6 @@ html[data-reader-theme='tfr'] app-root {
   }
 
   .super-event-copy h1 {
-    font-family: var(--tfr-display);
     text-shadow: 0 0 12px #e94bc875;
   }
 }

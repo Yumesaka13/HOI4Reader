@@ -33,6 +33,12 @@ html {
 
 html[data-reader-theme='tfr'] {
   color-scheme: dark;
+  @include mat.theme((
+    typography: (
+      plain-family: var(--tfr-display),
+      brand-family: var(--tfr-display),
+    ),
+  ));
   @include mat.theme-overrides((
     primary: #f49ce5,
     on-primary: #270d25,
@@ -83,6 +89,11 @@ body {
   background: var(--page);
   color: var(--on-surface);
   font-family: Roboto, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+html[data-reader-theme='tfr'],
+html[data-reader-theme='tfr'] body {
+  font-family: var(--tfr-display);
 }
 body {
   min-width: 960px;
