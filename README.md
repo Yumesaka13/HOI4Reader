@@ -6,7 +6,7 @@ A desktop story reader for Hearts of Iron IV mods. Pick a country, read its nati
 
 ## Home screen
 
-The TFR-themed home screen uses sample data.
+HOI4Reader running with a local installation of The Fire Rises. The menu artwork is from the mod.
 
 ![Home screen in the TFR theme](docs/screenshots/tfr-home.png)
 

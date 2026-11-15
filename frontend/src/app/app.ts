@@ -41,6 +41,11 @@ interface SuperEventTrack {
 type MusicEffect = { kind: 'play'; track: SuperEventTrack; recipient?: string | null } |
   { kind: 'branch'; arms: { owner?: string | null; condition: ScriptCondition<CountryFlag>; effects: MusicEffect[] }[] };
 
+interface TfrSuperEventSkin {
+  frame: string | null;
+  button: string | null;
+}
+
 interface SuperEvent {
   id: string;
   title: string;
@@ -408,11 +413,13 @@ export class App implements OnInit {
   superEvent: SuperEvent | null = null;
   superEventImage = '';
   superEventImageUnavailable = false;
+  superEventSkin: TfrSuperEventSkin | null = null;
   bgmNotice = '';
   audioStatus = '';
   audioNeedsGesture = false;
   private superEventContinuation: (() => void) | null = null;
   private superEventTrigger: HTMLElement | null = null;
+  private readonly tfrSuperEventSkins = new Map<string, Promise<TfrSuperEventSkin | null>>();
   private readonly audioQueue: SuperEventTrack[] = [];
   private playingAudio: HTMLAudioElement | null = null;
   private playingTrack: SuperEventTrack | null = null;
@@ -428,9 +435,11 @@ export class App implements OnInit {
     this.superEvent = scene;
     this.superEventImage = '';
     this.superEventImageUnavailable = false;
+    this.superEventSkin = null;
     this.superEventContinuation = continuation ?? null;
     this.changeDetector.markForCheck();
     setTimeout(() => document.getElementById('super-event-continue')?.focus(), 0);
+    if (this.saved.theme === 'tfr') void this.loadTfrSuperEventSkin(scene);
     if (scene.image_path && this.selectedMod) {
       void invoke<string | null>('load_super_event_image', {
         modPath: this.selectedMod.path,
@@ -456,6 +465,24 @@ export class App implements OnInit {
   onSuperEventImageError() {
     this.superEventImage = '';
     this.superEventImageUnavailable = true;
+  }
+
+  private async loadTfrSuperEventSkin(scene: SuperEvent) {
+    const path = this.mods.find((mod) => mod.workshop_id === '3350890356')?.path ?? this.selectedMod?.path;
+    if (!path) return;
+    let request = this.tfrSuperEventSkins.get(path);
+    if (!request) {
+      request = invoke<TfrSuperEventSkin | null>('load_tfr_super_event_skin', { modPath: path }).catch(() => {
+        this.tfrSuperEventSkins.delete(path);
+        return null;
+      });
+      this.tfrSuperEventSkins.set(path, request);
+    }
+    const skin = await request;
+    if (this.superEvent === scene) {
+      this.superEventSkin = skin;
+      this.changeDetector.markForCheck();
+    }
   }
 
   closeSuperEvent() {

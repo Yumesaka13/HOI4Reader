@@ -530,14 +530,29 @@ fn decode_dds(bytes: &mut [u8]) -> Option<image::DynamicImage> {
     if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
         return None;
     }
-    if bytes.get(84..88)? == b"DX10" {
-        let format = u32::from_le_bytes(bytes.get(128..132)?.try_into().ok()?);
-        let dimension = u32::from_le_bytes(bytes.get(132..136)?.try_into().ok()?);
-        let pitch = u32::from_le_bytes(bytes.get(20..24)?.try_into().ok()?) as usize;
-        let row_bytes = width as usize * 4;
+    let dds_u32 = |offset| Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?));
+    let bgra_offset: Option<usize> = match bytes.get(84..88)? {
         // TFR's main menu uses DXGI_FORMAT_B8G8R8A8_UNORM_SRGB.
-        if matches!(format, 87 | 91) && dimension == 3 && pitch >= row_bytes {
-            let data = bytes.get(148..148 + pitch.checked_mul(height as usize)?)?;
+        b"DX10" if matches!(dds_u32(128)?, 87 | 91) && dds_u32(132)? == 3 => Some(148),
+        // The original super-event button declares BGRA via legacy channel masks.
+        b"\0\0\0\0"
+            if [
+                dds_u32(88)?,
+                dds_u32(92)?,
+                dds_u32(96)?,
+                dds_u32(100)?,
+                dds_u32(104)?,
+            ] == [32, 0x00ff_0000, 0x0000_ff00, 0x0000_00ff, 0xff00_0000] =>
+        {
+            Some(128)
+        }
+        _ => None,
+    };
+    if let Some(offset) = bgra_offset {
+        let pitch = dds_u32(20)? as usize;
+        let row_bytes = width as usize * 4;
+        if pitch >= row_bytes {
+            let data = bytes.get(offset..offset.checked_add(pitch.checked_mul(height as usize)?)?)?;
             let mut rgba = Vec::with_capacity(row_bytes * height as usize);
             for row in data.chunks_exact(pitch) {
                 for pixel in row[..row_bytes].chunks_exact(4) {
@@ -573,6 +588,28 @@ fn decodes_the_bgra_dds_format_used_by_the_tfr_menu() {
     assert_eq!(image.get_pixel(0, 0).0, [33, 22, 11, 255]);
 }
 
+#[cfg(test)]
+#[test]
+fn decodes_the_legacy_bgra_dds_format_used_by_the_tfr_super_event_button() {
+    let mut bytes = [0; 132];
+    bytes[..4].copy_from_slice(b"DDS ");
+    for (offset, value) in [
+        (12, 1u32),
+        (16, 1),
+        (20, 4),
+        (88, 32),
+        (92, 0x00ff_0000),
+        (96, 0x0000_ff00),
+        (100, 0x0000_00ff),
+        (104, 0xff00_0000),
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[128..132].copy_from_slice(&[11, 22, 33, 128]);
+    let image = decode_dds(&mut bytes).unwrap().into_rgba8();
+    assert_eq!(image.get_pixel(0, 0).0, [33, 22, 11, 128]);
+}
+
 fn decode_scene_image(mod_path: &Path, image_path: &Path) -> Option<String> {
     let gfx = mod_path.join("gfx").canonicalize().ok()?;
     let path = image_path.canonicalize().ok()?;
@@ -598,10 +635,63 @@ fn decode_scene_image(mod_path: &Path, image_path: &Path) -> Option<String> {
 pub async fn load_tfr_menu_art(mod_path: String) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = Path::new(&mod_path);
-        if !root.join("interface/NVX_menu.gfx").is_file() {
+        let interface = root.join("interface");
+        if !interface.join("TFR_start_menu.gui").is_file()
+            && !interface.join("NVX_menu.gfx").is_file()
+        {
             return None;
         }
+        for file in ["frontendmainviewbg.gfx", "NVX_menu.gfx"] {
+            let Ok(script) = decode(&interface.join(file)) else {
+                continue;
+            };
+            for sprite in blocks(&script, "corneredTileSpriteType = {") {
+                if top_value(&sprite, "name") != "GFX_frontend_bg" {
+                    continue;
+                }
+                let texture = top_value(&sprite, "texturefile");
+                if let Some(image) = local_file(root, &texture)
+                    .and_then(|path| decode_scene_image(root, &path))
+                {
+                    return Some(image);
+                }
+            }
+        }
         decode_scene_image(root, &root.join("gfx/loadingscreens/main_menu.dds"))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[derive(Serialize)]
+pub struct TfrSuperEventSkin {
+    frame: Option<String>,
+    button: Option<String>,
+}
+
+#[tauri::command]
+pub async fn load_tfr_super_event_skin(mod_path: String) -> Option<TfrSuperEventSkin> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = Path::new(&mod_path);
+        let script = decode(&root.join("interface/TFR_Super_Events.gfx")).ok()?;
+        let mut skin = TfrSuperEventSkin {
+            frame: None,
+            button: None,
+        };
+        for sprite in blocks(&script, "spriteType = {") {
+            let target = match top_value(&sprite, "name").as_str() {
+                "GFX_Super_event_bg" => &mut skin.frame,
+                "GFX_spacebar" => &mut skin.button,
+                _ => continue,
+            };
+            let texture = top_value(&sprite, "texturefile");
+            *target = local_file(root, &texture).and_then(|path| decode_scene_image(root, &path));
+            if skin.frame.is_some() && skin.button.is_some() {
+                break;
+            }
+        }
+        Some(skin)
     })
     .await
     .ok()

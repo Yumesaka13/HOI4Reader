@@ -654,18 +654,20 @@
   aria-labelledby="super-event-title"
   (keydown.escape)="closeSuperEvent()"
 >
-  <mat-card appearance="outlined" class="super-event-card">
+  <mat-card appearance="outlined" class="super-event-card" [class.tfr-super-event-native-frame]="superEventSkin?.frame">
     <div class="super-event-art" *ngIf="superEventImage">
       <img [src]="superEventImage" [alt]="scene.title" (error)="onSuperEventImageError()" />
     </div>
+    <img class="tfr-super-event-frame" *ngIf="superEventSkin?.frame as frame" [src]="frame" alt="" />
     <mat-card-content class="super-event-copy">
       <h1 id="super-event-title">{{ scene.title }}</h1>
       <blockquote *ngIf="scene.quote">{{ scene.quote }}</blockquote>
       <p class="super-event-art-status" *ngIf="superEventImageUnavailable">{{ t('无法显示本机原图') }}</p>
       <ng-container *ngTemplateOutlet="superEventAudioStatus"></ng-container>
-      <button mat-flat-button id="super-event-continue" (click)="closeSuperEvent()">
+      <button mat-flat-button id="super-event-continue" (click)="closeSuperEvent()"
+        [style.background-image]="superEventSkin?.button ? 'url(' + superEventSkin?.button + ')' : null">
         {{ scene.dismiss || t('继续阅读') }}
-        <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+        <mat-icon *ngIf="saved.theme !== 'tfr'" iconPositionEnd>arrow_forward</mat-icon>
       </button>
     </mat-card-content>
   </mat-card>
