@@ -1,0 +1,19 @@
+[package]
+name = "hoi4-reader"
+version = "0.2.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+encoding_rs = "0.8"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "tga", "dds"] }
+
+regex = "1"

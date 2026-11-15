@@ -1,0 +1,11 @@
+{
+  "name": "hoi4-reader-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend start",
+    "tauri:dev": "npm --prefix frontend exec -- tauri dev",
+    "tauri:build": "npm --prefix frontend exec -- tauri build",
+    "tauri:build:msi": "npm --prefix frontend exec -- tauri build --bundles msi",
+    "frontend:build": "npm --prefix frontend run build"
+  }
+}

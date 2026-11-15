@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HOI4Reader",
+  "version": "0.2.0",
+  "identifier": "com.hoi4reader.desktop",
+  "build": {
+    "beforeDevCommand": "npm --prefix frontend start",
+    "devUrl": "http://localhost:4200",
+    "beforeBuildCommand": "npm --prefix frontend run build",
+    "frontendDist": "../frontend/dist/frontend/browser"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HOI4Reader",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico", "icons/icon.png", "icons/icon.icns"]
+  }
+}

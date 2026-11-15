@@ -1,0 +1,679 @@
+use super::{
+    block_body, blocks, decode, direct_statements, localisation_for, named_blocks,
+    script_condition_in_country, script_values, top_value, ScriptCondition, STANDARD,
+};
+use base64::Engine;
+use serde::Serialize;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::{Path, PathBuf},
+};
+use walkdir::WalkDir;
+
+#[derive(Clone, Serialize)]
+pub struct Scene {
+    id: String,
+    title: String,
+    quote: Option<String>,
+    dismiss: Option<String>,
+    image_path: Option<String>,
+    audio: Option<Track>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct Track {
+    title: String,
+    path: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MusicEffect {
+    Play {
+        track: Track,
+        recipient: Option<String>,
+    },
+    Branch {
+        arms: Vec<MusicArm>,
+    },
+}
+
+#[derive(Serialize, Clone)]
+pub struct MusicArm {
+    condition: ScriptCondition,
+    owner: Option<String>,
+    effects: Vec<MusicEffect>,
+}
+
+#[derive(Default)]
+struct FlagScene {
+    title: String,
+    quote: String,
+    dismiss: String,
+    image: Option<PathBuf>,
+}
+
+#[derive(Default)]
+pub struct Catalog {
+    flags: HashMap<String, FlagScene>,
+    sprites: HashMap<String, PathBuf>,
+    music: HashMap<String, PathBuf>,
+    sounds: HashMap<String, PathBuf>,
+    sound_aliases: HashMap<String, String>,
+    titles: HashMap<String, String>,
+    decision_music_after_gui: HashMap<String, Vec<MusicEffect>>,
+    dynamic_tno_audio: BTreeSet<String>,
+    tno: bool,
+}
+
+pub(super) fn local_file(base: &Path, value: &str) -> Option<PathBuf> {
+    if value.is_empty() {
+        return None;
+    }
+    let root = base.canonicalize().ok()?;
+    let path = base.join(value.replace('\\', "/"));
+    let resolved = path.canonicalize().ok()?;
+    (resolved.starts_with(root) && resolved.is_file()).then_some(path)
+}
+
+fn inner(block: &str) -> &str {
+    block
+        .find('{')
+        .zip(block.rfind('}'))
+        .and_then(|(start, end)| block.get(start + 1..end))
+        .unwrap_or_default()
+}
+
+impl Catalog {
+    pub fn load(
+        root: &Path,
+        language: &str,
+        loc: &BTreeMap<String, String>,
+        diagnostics: &mut Vec<String>,
+    ) -> Self {
+        let mut catalog = Self::default();
+        let tfr_loc = root.join("common/scripted_localisation/TFR_Super_Event_Scripted_Loc.txt");
+        let tno_effect = root.join("common/scripted_effects/TNO_super_events_scripted_effect.txt");
+        let tfr = tfr_loc.is_file();
+        if let Ok(script) = decode(&tno_effect) {
+            catalog.tno = true;
+            for key in ["if = {", "else_if = {"] {
+                for clause in blocks(&script, key) {
+                    // Look at each conditional clause, including those nested under the
+                    // game-rule guard. Only the actual token comparisons carry a token.
+                    for condition in blocks(&clause, "check_variable = {") {
+                        let token = top_value(&condition, "TNO_temp_super_event");
+                        if let Some(token) = token.strip_prefix("token:") {
+                            if script_values(&clause, "scoped_play_song")
+                                .iter()
+                                .any(|song| song.starts_with(&format!("TNO_{token}_")))
+                            {
+                                catalog.dynamic_tno_audio.insert(token.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for name in ["TFR_Super_Events.gfx", "TNO_SG_Super_Event.gfx"] {
+            let Ok(script) = decode(&root.join("interface").join(name)) else {
+                continue;
+            };
+            for sprite in blocks(&script, "spriteType = {") {
+                let name = top_value(&sprite, "name");
+                let mut texture = top_value(&sprite, "texturefile");
+                if texture.is_empty() {
+                    texture = top_value(&sprite, "textureFile");
+                }
+                if let Some(path) = local_file(root, &texture) {
+                    catalog.sprites.insert(name, path);
+                }
+            }
+        }
+
+        if let Ok(script) = decode(&tfr_loc) {
+            for text in blocks(&script, "defined_text = {") {
+                let kind = top_value(&text, "name");
+                for entry in blocks(&text, "text = {") {
+                    let flags = Self::flags(&entry, "has");
+                    if flags.len() != 1 {
+                        continue;
+                    }
+                    let scene = catalog.flags.entry(flags[0].clone()).or_default();
+                    let key = top_value(&entry, "localization_key");
+                    match kind.as_str() {
+                        "get_super_event_title" => scene.title = key,
+                        "get_superevent_quote" => scene.quote = key,
+                        "get_superevent_buton" => scene.dismiss = key,
+                        _ => {}
+                    }
+                }
+            }
+            catalog.flags.retain(|_, scene| !scene.title.is_empty());
+        }
+
+        if tfr {
+            let gui = decode(&root.join("interface/TFR_Super_Events.gui")).unwrap_or_default();
+            let windows = blocks(&gui, "containerWindowType = {")
+                .into_iter()
+                .filter_map(|window| {
+                    let sprite = blocks(&window, "background = {")
+                        .first()
+                        .map(|background| top_value(background, "spriteType"))?;
+                    Some((
+                        top_value(&window, "name"),
+                        catalog.sprites.get(&sprite)?.clone(),
+                    ))
+                })
+                .collect::<HashMap<_, _>>();
+            let gui =
+                decode(&root.join("common/scripted_guis/TFR_super_events.txt")).unwrap_or_default();
+            for group in blocks(&gui, "scripted_gui = {") {
+                for (_, entry) in named_blocks(inner(&group)) {
+                    let window = top_value(&entry, "window_name");
+                    let Some(image) = windows.get(&window) else {
+                        continue;
+                    };
+                    for condition in blocks(&entry, "visible = {") {
+                        for flag in Self::flags(&condition, "has") {
+                            if let Some(scene) = catalog.flags.get_mut(&flag) {
+                                scene.image = Some(image.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Steam installs the official soundtrack as a separate Workshop item.
+        if tfr {
+            let companion = root
+                .parent()
+                .map(|parent| parent.join("3350892196"))
+                .filter(|path| path.join("music").is_dir());
+            if let Some(companion) = companion {
+                catalog.load_audio_assets(&companion, "music");
+                let companion_loc = localisation_for(&companion, language, diagnostics);
+                catalog.load_titles(&companion_loc);
+            } else {
+                diagnostics.push("The Fire Rises Music Addon (3350892196) is missing from this Workshop library. Some scripted tracks are unavailable.".into());
+            }
+        }
+        catalog.load_audio_assets(root, "music");
+        catalog.load_audio_assets(root, "sound");
+        catalog.load_titles(loc);
+        if tfr {
+            // The reader has no in-game time machine window. Its closing cue
+            // belongs to the decision that opens that window.
+            let gui = decode(&root.join("common/scripted_guis/TFR_scripted_guis_JAP.txt"))
+                .unwrap_or_default();
+            for (_, window) in blocks(&gui, "scripted_gui = {")
+                .iter()
+                .flat_map(|script| named_blocks(inner(script)))
+                .filter(|(key, _)| key == "TFR_JAP_time_travel")
+            {
+                let visible = blocks(&window, "visible = {");
+                if visible
+                    .first()
+                    .is_none_or(|block| top_value(block, "has_country_flag") != "time_travel_flag")
+                {
+                    continue;
+                }
+                for close in blocks(&window, "close_button_click = {") {
+                    if top_value(&close, "clr_country_flag") == "time_travel_flag" {
+                        catalog
+                            .decision_music_after_gui
+                            .insert("time_travel_flag".into(), catalog.music_effects(&close));
+                    }
+                }
+            }
+        }
+        catalog
+    }
+
+    pub fn decision_music(&self, scope: &str) -> Vec<MusicEffect> {
+        let mut effects = self.music_effects(scope);
+        for (name, flag) in super::effect_commands(scope) {
+            if name == "set_country_flag" {
+                effects.extend(
+                    self.decision_music_after_gui
+                        .get(flag)
+                        .into_iter()
+                        .flatten()
+                        .cloned(),
+                );
+            }
+        }
+        effects
+    }
+
+    fn load_titles(&mut self, loc: &BTreeMap<String, String>) {
+        for (key, text) in loc {
+            let id = key.to_ascii_lowercase();
+            if self.music.contains_key(&id)
+                || self.sounds.contains_key(&id)
+                || self.sound_aliases.contains_key(&id)
+            {
+                if let Some(title) = track_title(text) {
+                    self.titles.insert(id, title);
+                }
+            }
+        }
+    }
+
+    fn load_audio_assets(&mut self, root: &Path, directory: &str) {
+        for entry in WalkDir::new(root.join(directory))
+            .sort_by_file_name()
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("asset"))
+            })
+        {
+            let Ok(script) = decode(entry.path()) else {
+                continue;
+            };
+            let base = entry.path().parent().unwrap_or(root);
+            let (marker, index) = if directory == "music" {
+                ("music = {", &mut self.music)
+            } else {
+                ("sound = {", &mut self.sounds)
+            };
+            for asset in blocks(&script, marker) {
+                let name = top_value(&asset, "name");
+                let file = top_value(&asset, "file");
+                if let Some(path) = local_file(base, &file) {
+                    index.insert(name.to_ascii_lowercase(), path);
+                }
+            }
+            if directory == "sound" {
+                for effect in blocks(&script, "soundeffect = {") {
+                    let sounds = script_values(&effect, "sound");
+                    if sounds.len() == 1 {
+                        self.sound_aliases.insert(
+                            top_value(&effect, "name").to_ascii_lowercase(),
+                            sounds[0].to_ascii_lowercase(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn music_effects(&self, scope: &str) -> Vec<MusicEffect> {
+        if !scope.contains("play_song") {
+            return Vec::new();
+        }
+        self.music_in_scope(scope, None, 12)
+    }
+
+    fn music_in_scope(&self, scope: &str, owner: Option<&str>, depth: u8) -> Vec<MusicEffect> {
+        if depth == 0 {
+            return Vec::new();
+        }
+        let mut results = Vec::new();
+        let mut chain = Vec::<MusicArm>::new();
+        let flush = |chain: &mut Vec<MusicArm>, results: &mut Vec<MusicEffect>| {
+            if chain.iter().any(|arm| !arm.effects.is_empty()) {
+                results.push(MusicEffect::Branch {
+                    arms: std::mem::take(chain),
+                });
+            } else {
+                chain.clear();
+            }
+        };
+        for (key, value) in direct_statements(block_body(scope).unwrap_or_default()) {
+            let command = key.to_ascii_lowercase();
+            if !matches!(command.as_str(), "else_if" | "else") {
+                flush(&mut chain, &mut results);
+            }
+            match command.as_str() {
+                "scoped_play_song" | "play_song" => {
+                    let id = value.trim_matches('"').to_ascii_lowercase();
+                    if !id.contains("silence") {
+                        if let Some(track) = self.track(&id, self.music.get(&id), None) {
+                            results.push(MusicEffect::Play {
+                                track,
+                                recipient: owner.map(str::to_string),
+                            });
+                        }
+                    }
+                }
+                "hidden_effect" => results.extend(self.music_in_scope(value, owner, depth - 1)),
+                "if" | "else_if" | "else" if command == "if" || !chain.is_empty() => {
+                    let condition = if command == "else" {
+                        ScriptCondition::All(Vec::new())
+                    } else {
+                        direct_statements(block_body(value).unwrap_or_default())
+                            .find_map(|(key, value)| {
+                                key.eq_ignore_ascii_case("limit")
+                                    .then(|| block_body(value))
+                                    .flatten()
+                            })
+                            .map(|limit| {
+                                script_condition_in_country(limit, 8, owner.unwrap_or_default())
+                            })
+                            .unwrap_or(ScriptCondition::Unknown)
+                    };
+                    chain.push(MusicArm {
+                        condition,
+                        owner: owner.map(str::to_string),
+                        effects: self.music_in_scope(value, owner, depth - 1),
+                    });
+                }
+                _ if key.len() == 3
+                    && key
+                        .bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                    && !matches!(key, "NOT" | "AND" | "NOR") =>
+                {
+                    results.extend(self.music_in_scope(value, Some(key), depth - 1));
+                }
+                _ => {}
+            }
+        }
+        flush(&mut chain, &mut results);
+        results
+    }
+
+    fn flags(scope: &str, command: &str) -> Vec<String> {
+        ["country", "global"]
+            .into_iter()
+            .flat_map(|scope_type| {
+                let prefix = format!("{scope_type}:");
+                script_values(scope, &format!("{command}_{scope_type}_flag"))
+                    .into_iter()
+                    .map(move |flag| format!("{prefix}{flag}"))
+            })
+            .collect()
+    }
+
+    pub fn resolve<'a>(
+        &self,
+        scopes: impl IntoIterator<Item = &'a str>,
+        loc: &BTreeMap<String, String>,
+    ) -> Option<Scene> {
+        let scopes = scopes.into_iter().collect::<Vec<_>>();
+        let mut matches = BTreeMap::new();
+        for scope in scopes {
+            if self.tno
+                && scope.contains("TNO_fire_super_event")
+                && script_values(scope, "TNO_fire_super_event")
+                    .iter()
+                    .any(|value| value == "yes")
+            {
+                for variable in blocks(scope, "set_temp_variable = {") {
+                    let token = top_value(&variable, "TNO_temp_super_event");
+                    let Some(id) = token.strip_prefix("token:SE_") else {
+                        continue;
+                    };
+                    let key = format!("SE_{id}");
+                    let track = format!("TNO_{key}");
+                    matches.insert(
+                        key.clone(),
+                        Scene {
+                            id: key.clone(),
+                            title: super::localized(loc, &key),
+                            quote: loc.get(&format!("{key}_D")).cloned(),
+                            dismiss: loc.get(&format!("{key}_A")).cloned(),
+                            image_path: self
+                                .sprites
+                                .get(&format!("GFX_{key}"))
+                                .map(|p| p.display().to_string()),
+                            audio: (!self.dynamic_tno_audio.contains(&key))
+                                .then(|| {
+                                    self.track(
+                                        &track,
+                                        self.music.get(&track.to_ascii_lowercase()),
+                                        None,
+                                    )
+                                })
+                                .flatten(),
+                        },
+                    );
+                }
+            }
+            if self.flags.is_empty() || !scope.contains("set_") {
+                continue;
+            }
+            for id in Self::flags(scope, "set") {
+                let Some(scene) = self.flags.get(&id) else {
+                    continue;
+                };
+                matches.insert(
+                    id.clone(),
+                    Scene {
+                        id,
+                        title: super::localized(loc, &scene.title),
+                        quote: loc.get(&scene.quote).cloned(),
+                        dismiss: loc.get(&scene.dismiss).cloned(),
+                        image_path: scene.image.as_ref().map(|p| p.display().to_string()),
+                        audio: self.tfr_track(scope, loc.get(&scene.title).map(String::as_str)),
+                    },
+                );
+            }
+        }
+        (matches.len() == 1)
+            .then(|| matches.into_values().next())
+            .flatten()
+    }
+
+    fn tfr_track(&self, scope: &str, scene_title: Option<&str>) -> Option<Track> {
+        // TFR often plays the actual cue as a sound effect alongside a silent song.
+        for (commands, is_sound) in [
+            (["sound_effect", "scoped_sound_effect"], true),
+            (["play_song", "scoped_play_song"], false),
+        ] {
+            let tracks = commands
+                .into_iter()
+                .flat_map(|key| script_values(scope, key))
+                .filter_map(|name| {
+                    let id = name.to_ascii_lowercase();
+                    if id.contains("silence") {
+                        return None;
+                    }
+                    let path = if is_sound {
+                        self.sounds.get(self.sound_aliases.get(&id).unwrap_or(&id))
+                    } else {
+                        self.music.get(&id)
+                    };
+                    self.track(&id, path, if is_sound { scene_title } else { None })
+                        .map(|track| (track.path.clone(), track))
+                })
+                .collect::<BTreeMap<_, _>>();
+            match tracks.len() {
+                0 => {}
+                1 => return tracks.into_values().next(),
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    fn track(&self, key: &str, path: Option<&PathBuf>, scene_title: Option<&str>) -> Option<Track> {
+        let path = path?;
+        let title = self
+            .titles
+            .get(&key.to_ascii_lowercase())
+            .cloned()
+            .or_else(|| scene_title.and_then(track_title))
+            .unwrap_or_else(|| key.to_string());
+        Some(Track {
+            title,
+            path: path.display().to_string(),
+        })
+    }
+}
+
+fn track_title(text: &str) -> Option<String> {
+    static MARKUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let markup = MARKUP
+        .get_or_init(|| regex::Regex::new(r"§[A-Za-z0-9!?]|£[A-Za-z0-9_]+(?:\|\d+)?").unwrap());
+    let clean = markup.replace_all(text, "");
+    clean
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn decode_dds(bytes: &mut [u8]) -> Option<image::DynamicImage> {
+    if bytes.get(..4)? != b"DDS " {
+        return None;
+    }
+    let height = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?);
+    let width = u32::from_le_bytes(bytes.get(16..20)?.try_into().ok()?);
+    if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
+        return None;
+    }
+    if bytes.get(84..88)? == b"DX10" {
+        let format = u32::from_le_bytes(bytes.get(128..132)?.try_into().ok()?);
+        let dimension = u32::from_le_bytes(bytes.get(132..136)?.try_into().ok()?);
+        let pitch = u32::from_le_bytes(bytes.get(20..24)?.try_into().ok()?) as usize;
+        let row_bytes = width as usize * 4;
+        // TFR's main menu uses DXGI_FORMAT_B8G8R8A8_UNORM_SRGB.
+        if matches!(format, 87 | 91) && dimension == 3 && pitch >= row_bytes {
+            let data = bytes.get(148..148 + pitch.checked_mul(height as usize)?)?;
+            let mut rgba = Vec::with_capacity(row_bytes * height as usize);
+            for row in data.chunks_exact(pitch) {
+                for pixel in row[..row_bytes].chunks_exact(4) {
+                    rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+                }
+            }
+            return image::RgbaImage::from_raw(width, height, rgba)
+                .map(image::DynamicImage::ImageRgba8);
+        }
+    }
+    if matches!(bytes.get(84..88)?, b"DXT1" | b"DXT3" | b"DXT5") {
+        // The file already contains complete compression blocks at the edges.
+        // Decode those blocks, then crop back to the authored canvas.
+        bytes[12..16].copy_from_slice(&height.next_multiple_of(4).to_le_bytes());
+        bytes[16..20].copy_from_slice(&width.next_multiple_of(4).to_le_bytes());
+    }
+    image::load_from_memory_with_format(bytes, image::ImageFormat::Dds)
+        .ok()
+        .map(|decoded| decoded.crop_imm(0, 0, width, height))
+}
+
+#[cfg(test)]
+#[test]
+fn decodes_the_bgra_dds_format_used_by_the_tfr_menu() {
+    let mut bytes = [0; 156];
+    bytes[..4].copy_from_slice(b"DDS ");
+    bytes[84..88].copy_from_slice(b"DX10");
+    for (offset, value) in [(12, 1u32), (16, 1), (20, 8), (128, 91), (132, 3)] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[148..152].copy_from_slice(&[11, 22, 33, 255]);
+    let image = decode_dds(&mut bytes).unwrap().into_rgba8();
+    assert_eq!(image.get_pixel(0, 0).0, [33, 22, 11, 255]);
+}
+
+fn decode_scene_image(mod_path: &Path, image_path: &Path) -> Option<String> {
+    let gfx = mod_path.join("gfx").canonicalize().ok()?;
+    let path = image_path.canonicalize().ok()?;
+    if !path.starts_with(gfx) || path.metadata().ok()?.len() > 32 * 1024 * 1024 {
+        return None;
+    }
+    let mut bytes = std::fs::read(path).ok()?;
+    let decoded = if bytes.starts_with(b"DDS ") {
+        decode_dds(&mut bytes)?
+    } else {
+        image::load_from_memory(&bytes).ok()?
+    };
+    let image = decoded.thumbnail(1600, 1000);
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(png.into_inner())
+    ))
+}
+
+#[tauri::command]
+pub async fn load_tfr_menu_art(mod_path: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = Path::new(&mod_path);
+        if !root.join("interface/NVX_menu.gfx").is_file() {
+            return None;
+        }
+        decode_scene_image(root, &root.join("gfx/loadingscreens/main_menu.dds"))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+pub(super) fn with_event_art(mut scene: Scene, event_art: Option<&PathBuf>) -> Scene {
+    if scene.image_path.is_none() {
+        scene.image_path = event_art.map(|path| path.display().to_string());
+    }
+    scene
+}
+
+#[tauri::command]
+pub async fn load_super_event_image(mod_path: String, image_path: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        decode_scene_image(Path::new(&mod_path), Path::new(&image_path))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[cfg(test)]
+#[test]
+fn conditional_music_uses_the_asset_title_and_preserves_the_else_arm() {
+    let mut catalog = Catalog::default();
+    catalog
+        .music
+        .insert("dregs".into(), "audio/dregs.ogg".into());
+    catalog
+        .music
+        .insert("korogaru".into(), "audio/korogaru.ogg".into());
+    catalog.load_titles(&BTreeMap::from([
+        ("dregs".into(), "§Yたんたんたん§!\n\n£GFX_album_art".into()),
+        ("korogaru".into(), "転がる岩、君に朝が降る".into()),
+    ]));
+    let effects = catalog.music_effects(r#"immediate = {
+        if = { limit = { has_global_flag = JAP_japan_lost } hidden_effect = { scoped_play_song = dregs } }
+        ELSE = { scoped_play_song = korogaru }
+        effect_tooltip = { scoped_play_song = korogaru }
+    }"#);
+    let [MusicEffect::Branch { arms }] = effects.as_slice() else {
+        panic!("expected one branch")
+    };
+    assert_eq!(arms.len(), 2);
+    assert!(
+        matches!(&arms[0].effects[0], MusicEffect::Play { track, .. } if track.title == "たんたんたん")
+    );
+    assert!(
+        matches!(&arms[1].effects[0], MusicEffect::Play { track, .. } if track.title == "転がる岩、君に朝が降る")
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn decodes_partial_dxt5_edge_blocks_at_original_size() {
+    let mut bytes = vec![0; 128 + 16];
+    bytes[..4].copy_from_slice(b"DDS ");
+    for (offset, value) in [
+        (4, 124u32),
+        (8, 0x81007),
+        (12, 2),
+        (16, 3),
+        (20, 16),
+        (76, 32),
+        (80, 4),
+        (108, 0x1000),
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[84..88].copy_from_slice(b"DXT5");
+    let image = decode_dds(&mut bytes).expect("padded DXT5 blocks should decode");
+    assert_eq!((image.width(), image.height()), (3, 2));
+}
