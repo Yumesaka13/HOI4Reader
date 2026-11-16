@@ -802,12 +802,25 @@
   </span>
 </ng-template>
 
-<ng-template #gameMarkup let-text>
+<ng-template #gameMarkup let-text let-bitmap="bitmap">
   @for (token of gameText(text); track $index) {
     @if (token.icon && inlineImage(token.icon); as image) {
       <img class="inline-game-icon" [class.inline-game-flag]="token.flag" [src]="image" [alt]="token.text" />
     } @else {
-      <span [style.--game-text-color]="token.color" [class.game-text-colored]="token.color" [class.inline-flag-tag]="token.flag">{{ token.text }}</span>
+      <span [style.--game-text-color]="token.color" [class.game-text-colored]="token.color" [class.inline-flag-tag]="token.flag">@if (bitmap) {
+        @for (run of tnoBitmapRuns(token.text, bitmap); track $index) {
+          @if (run.glyph; as glyph) {
+            <span class="tno-bitmap-character" [style.width.em]="glyph.advance">{{ run.text }}<span
+              class="tno-bitmap-ink" [style.--tno-glyph]="'url(' + glyph.image + ')'"
+              [style.width.em]="glyph.width" [style.height.em]="glyph.height"
+              [style.left.em]="glyph.left" [style.bottom.em]="glyph.bottom" aria-hidden="true"></span></span>
+          } @else {
+            <ng-container>{{ run.text }}</ng-container>
+          }
+        }
+      } @else {
+        <ng-container>{{ token.text }}</ng-container>
+      }</span>
     }
   }
 </ng-template>
@@ -837,7 +850,7 @@
       [style.--tno-button]="tnoSuperEventSkin?.button ? 'url(' + tnoSuperEventSkin?.button + ')' : null">
       <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_title" class="tno-super-event-nuclear-title"
         [src]="tnoSuperEventSkin?.nuclear_title" alt="" />
-      <h1 id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title }"></ng-container></h1>
+      <h1 id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title, bitmap: tnoSuperEventGlyphs?.title }"></ng-container></h1>
       <img *ngIf="superEventImage" class="tno-super-event-picture"
         [src]="superEventImage" [alt]="plainGameText(scene.title)" (error)="onSuperEventImageError()" />
       <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_frame; else tnoFrame"
@@ -845,10 +858,10 @@
       <ng-template #tnoFrame><div class="tno-super-event-frame" aria-hidden="true"></div></ng-template>
       <div *ngIf="scene.quote" class="tno-super-event-quote-underlay" aria-hidden="true"></div>
       <blockquote *ngIf="scene.quote" tabindex="0">
-        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.quote }"></ng-container>
+        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.quote, bitmap: tnoSuperEventGlyphs?.quote }"></ng-container>
       </blockquote>
       <button mat-button id="super-event-continue" (click)="closeSuperEvent()">
-        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.dismiss || t('继续阅读') }"></ng-container>
+        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.dismiss || t('继续阅读'), bitmap: tnoSuperEventGlyphs?.quote }"></ng-container>
       </button>
     </div>
     <p *ngIf="superEventImageUnavailable" class="tno-super-event-status">{{ t('无法显示本机原图') }}</p>

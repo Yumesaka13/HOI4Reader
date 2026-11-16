@@ -167,6 +167,43 @@ describe('App', () => {
     }
   });
 
+  it('uses the Chinese TNO title and quote glyphs while preserving the original text', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    app.setTheme('tno');
+    app.saved.language = 'simp_chinese';
+    app.selectedMod = { name: 'The New Order', path: '/tno', workshop_id: '2438003901' };
+    const glyph = { image: 'data:image/png;base64,test', width: 1, height: 1, left: 0, bottom: 0, advance: 1 };
+    const backend = vi.fn((command: string) => command === 'load_tno_super_event_glyphs'
+      ? { title: { '战': glyph }, quote: { '和': glyph } }
+      : null);
+    mockIPC(backend);
+    try {
+      app.previewSuperEvent({ id: 'test', title: 'TNO战', quote: '§G和§!平',
+        dismiss: '和', image_path: null, audio: null });
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        const panel = fixture.nativeElement.querySelector('.tno-super-event-panel') as HTMLElement;
+        const title = panel.querySelector('h1');
+        const quote = panel.querySelector('blockquote');
+        expect(title?.textContent).toBe('TNO战');
+        expect(title?.querySelector('.tno-bitmap-character')?.textContent).toBe('战');
+        expect(quote?.textContent).toBe('和平');
+        expect(quote?.querySelector('.game-text-colored .tno-bitmap-character')?.textContent).toBe('和');
+        expect(panel.querySelector('button .tno-bitmap-character')?.textContent).toBe('和');
+      });
+      expect(backend).toHaveBeenCalledWith('load_tno_super_event_glyphs', {
+        modPath: '/tno', title: 'TNO战', quoteAndButton: '和平\n和',
+      });
+    } finally {
+      clearMocks();
+      delete document.documentElement.dataset['readerTheme'];
+    }
+  });
+
   it('renders flags in opening notes and previews search matches without advancing the route', async () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;

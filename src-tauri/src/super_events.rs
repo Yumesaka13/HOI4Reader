@@ -676,6 +676,10 @@ fn decode_scene_image(mod_path: &Path, image_path: &Path) -> Option<String> {
     } else {
         decoded
     };
+    png_data_url(&image)
+}
+
+fn png_data_url(image: &image::DynamicImage) -> Option<String> {
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).ok()?;
     Some(format!(
@@ -718,6 +722,128 @@ pub async fn load_tno_super_event_skin(mod_path: String) -> Option<TnoSuperEvent
     .await
     .ok()
     .flatten()
+}
+
+#[derive(Serialize)]
+struct TnoGlyph {
+    image: String,
+    advance: f32,
+    width: f32,
+    height: f32,
+    left: f32,
+    bottom: f32,
+}
+
+#[derive(Serialize, Default)]
+pub struct TnoSuperEventGlyphs {
+    title: BTreeMap<char, TnoGlyph>,
+    quote: BTreeMap<char, TnoGlyph>,
+}
+
+fn bitmap_field(line: &str, field: &str) -> Option<i32> {
+    line.split_ascii_whitespace()
+        .filter_map(|word| word.split_once('='))
+        .find_map(|(name, value)| (name == field).then(|| value.parse().ok()).flatten())
+}
+
+fn load_tno_glyph_page(
+    root: &Path,
+    stem: &str,
+    page: i32,
+    wanted: &BTreeSet<char>,
+) -> Option<BTreeMap<char, TnoGlyph>> {
+    if wanted.is_empty() {
+        return None;
+    }
+    let relative = format!("gfx/fonts/{stem}");
+    let metadata = std::fs::read_to_string(local_file(root, &format!("{relative}.fnt"))?).ok()?;
+    let size = bitmap_field(metadata.lines().next()?, "size")?.unsigned_abs() as f32;
+    let baseline = bitmap_field(
+        metadata.lines().find(|line| line.starts_with("common "))?,
+        "base",
+    )?;
+    if size == 0.0 {
+        return None;
+    }
+    let rows: Vec<_> = metadata
+        .lines()
+        .filter_map(|line| {
+            let id = line
+                .strip_prefix("char id=")?
+                .split_ascii_whitespace()
+                .next()?;
+            let glyph = char::from_u32(id.parse().ok()?)?;
+            wanted.contains(&glyph).then_some((glyph, line))
+        })
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    // The publisher uses the font stem for the DDS even when the descriptor names it with _0.
+    let path = local_file(root, &format!("{relative}.dds"))
+        .or_else(|| local_file(root, &format!("{relative}_{page}.dds")))?;
+    let mut bytes = std::fs::read(path).ok()?;
+    let sheet = decode_dds(&mut bytes)?;
+    Some(
+        rows.into_iter()
+            .filter_map(|(glyph, line)| {
+                let metric = |name| bitmap_field(line, name);
+                if metric("page")? != page {
+                    return None;
+                }
+                let x = u32::try_from(metric("x")?).ok()?;
+                let y = u32::try_from(metric("y")?).ok()?;
+                let width = u32::try_from(metric("width")?).ok()?;
+                let height = u32::try_from(metric("height")?).ok()?;
+                if !(1..=64).contains(&width)
+                    || !(1..=64).contains(&height)
+                    || x.checked_add(width)? > sheet.width()
+                    || y.checked_add(height)? > sheet.height()
+                {
+                    return None;
+                }
+                Some((
+                    glyph,
+                    TnoGlyph {
+                        image: png_data_url(&sheet.crop_imm(x, y, width, height))?,
+                        advance: metric("xadvance")? as f32 / size,
+                        width: width as f32 / size,
+                        height: height as f32 / size,
+                        left: metric("xoffset")? as f32 / size,
+                        bottom: (baseline as f32 - metric("yoffset")? as f32 - height as f32)
+                            / size,
+                    },
+                ))
+            })
+            .collect(),
+    )
+}
+
+#[tauri::command]
+pub async fn load_tno_super_event_glyphs(
+    mod_path: String,
+    title: String,
+    quote_and_button: String,
+) -> TnoSuperEventGlyphs {
+    tauri::async_runtime::spawn_blocking(move || {
+        let wanted = |text: &str| -> BTreeSet<char> {
+            text.chars()
+                .filter(|ch| matches!(*ch, '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}'))
+                .take(800)
+                .collect()
+        };
+        let roots = super::mod_layers::localisation_roots(Path::new(&mod_path));
+        let load = |stem, page, wanted| roots.iter().rev()
+            .find_map(|root| load_tno_glyph_page(root, stem, page, wanted))
+            .unwrap_or_default();
+        let title_text = wanted(&title);
+        let mut title = load("fzrzhdb_20_outline_0", 0, &title_text);
+        title.extend(load("fzrzhdb_20_outline_1", 1, &title_text));
+        TnoSuperEventGlyphs {
+            title,
+            quote: load("fzwhjz_22", 0, &wanted(&quote_and_button)),
+        }
+    }).await.unwrap_or_default()
 }
 
 #[tauri::command]

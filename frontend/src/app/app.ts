@@ -95,6 +95,22 @@ interface TnoSuperEventSkin {
   quote_font: string | null;
 }
 
+interface TnoBitmapGlyph {
+  image: string;
+  advance: number;
+  width: number;
+  height: number;
+  left: number;
+  bottom: number;
+}
+
+type TnoBitmapFont = Record<string, TnoBitmapGlyph>;
+
+interface TnoSuperEventGlyphs {
+  title: TnoBitmapFont;
+  quote: TnoBitmapFont;
+}
+
 interface SuperEvent {
   id: string;
   title: string;
@@ -509,6 +525,7 @@ export class App implements OnInit {
   superEventImageUnavailable = false;
   superEventSkin: TfrSuperEventSkin | null = null;
   tnoSuperEventSkin: TnoSuperEventSkin | null = null;
+  tnoSuperEventGlyphs: TnoSuperEventGlyphs | null = null;
   bgmNotice = '';
   audioStatus = '';
   audioNeedsGesture = false;
@@ -533,6 +550,7 @@ export class App implements OnInit {
     this.superEventImageUnavailable = false;
     this.superEventSkin = null;
     this.tnoSuperEventSkin = null;
+    this.tnoSuperEventGlyphs = null;
     this.superEventContinuation = continuation ?? null;
     this.changeDetector.markForCheck();
     setTimeout(() => document.getElementById('super-event-continue')?.focus(), 0);
@@ -593,6 +611,16 @@ export class App implements OnInit {
       ? selected.path
       : this.mods.find((mod) => mod.workshop_id === '2438003901')?.path ?? selected?.path;
     if (!path) return;
+    const title = this.plainGameText(scene.title);
+    const quoteAndButton = this.plainGameText(`${scene.quote ?? ''}\n${scene.dismiss || this.t('继续阅读')}`);
+    if (this.readerLanguage !== 'ja' && /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/u.test(title + quoteAndButton)) {
+      void invoke<TnoSuperEventGlyphs>('load_tno_super_event_glyphs', { modPath: path, title, quoteAndButton })
+        .then((glyphs) => {
+          if (this.superEvent !== scene) return;
+          this.tnoSuperEventGlyphs = glyphs;
+          this.changeDetector.markForCheck();
+        }).catch(() => {});
+    }
     let request = this.tnoSuperEventSkins.get(path);
     if (!request) {
       request = invoke<TnoSuperEventSkin | null>('load_tno_super_event_skin', { modPath: path })
@@ -2608,6 +2636,23 @@ export class App implements OnInit {
 
   plainGameText(text: string): string {
     return this.gameText(text).map((token) => token.text).join('');
+  }
+
+  tnoBitmapRuns(text: string, font: TnoBitmapFont) {
+    const runs: { text: string; glyph?: TnoBitmapGlyph }[] = [];
+    let plain = '';
+    for (const character of text) {
+      const glyph = font[character];
+      if (!glyph) {
+        plain += character;
+        continue;
+      }
+      if (plain) runs.push({ text: plain });
+      plain = '';
+      runs.push({ text: character, glyph });
+    }
+    if (plain) runs.push({ text: plain });
+    return runs;
   }
 
   gameText(text: string) {

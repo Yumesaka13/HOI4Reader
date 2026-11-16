@@ -2,7 +2,9 @@
 
 html[data-reader-theme='tno'] {
   color-scheme: dark;
-  --tno-font: 'Aldrich', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  --tno-cjk-font: '方正锐正黑_GBK DemiBold', 'Noto Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  --tno-font: 'Aldrich', var(--tno-cjk-font);
+  --tno-quote-font: 'TNO Super Event Quote', '方正字迹-文翰建筑体', var(--tno-cjk-font);
   @include mat.theme((
     typography: (
       plain-family: var(--tno-font),
@@ -48,8 +50,11 @@ html[data-reader-theme='tno'] {
   --outline: var(--mat-sys-outline);
   --outline-variant: var(--mat-sys-outline-variant);
 
-  &:lang(zh-Hant) { --tno-font: 'Aldrich', 'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif; }
-  &:lang(ja) { --tno-font: 'Aldrich', 'Noto Sans CJK JP', 'Yu Gothic', sans-serif; }
+  &:lang(zh-Hant) { --tno-cjk-font: 'Noto Sans TC', 'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif; }
+  &:lang(ja) {
+    --tno-cjk-font: 'Noto Sans JP', 'Noto Sans CJK JP', 'Yu Gothic', sans-serif;
+    --tno-quote-font: 'TNO Super Event Quote', var(--tno-cjk-font);
+  }
 
   body { font-family: var(--tno-font); }
   .shell, .content, .topbar, mat-card { color: var(--on-surface); }
@@ -167,7 +172,7 @@ html[data-reader-theme='tno'] {
   inset: calc(285 * var(--tno-unit)) calc(10 * var(--tno-unit)) calc(64 * var(--tno-unit)) calc(120 * var(--tno-unit));
   margin: 0;
   overflow: auto;
-  font: 400 clamp(13px, 4.1cqw, 28px)/1.09 'TNO Super Event Quote', var(--tno-font, monospace);
+  font: 400 clamp(13px, 4.1cqw, 28px)/1.09 var(--tno-quote-font, monospace);
   text-align: right;
   text-shadow: 1px 1px #000, -1px 1px #000;
   white-space: pre-line;
@@ -185,7 +190,7 @@ html[data-reader-theme='tno'] {
   border-radius: 3px;
   background: var(--tno-button, linear-gradient(#626663, #313738)) center / calc(221 * var(--tno-unit)) calc(36 * var(--tno-unit)) no-repeat;
   color: #fff;
-  font: 400 clamp(13px, 3.8cqw, 24px)/1.05 'TNO Super Event Quote', var(--tno-font, monospace);
+  font: 400 clamp(13px, 3.8cqw, 24px)/1.05 var(--tno-quote-font, monospace);
   white-space: normal;
   text-shadow: 1px 1px #000;
 }
@@ -195,6 +200,30 @@ html[data-reader-theme='tno'] {
 .tno-super-event-panel blockquote:focus-visible { outline: 2px solid var(--primary); }
 .tno-super-event-status { font-size: 0.875rem; }
 .tno-super-event .bgm-status { margin-block-start: 12px; }
+
+.tno-bitmap-character {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  color: transparent;
+  text-shadow: none;
+
+}
+
+.tno-bitmap-ink {
+  position: absolute;
+  // The inline block's natural descent is below the font's baseline.
+  margin-bottom: 0.13em;
+  background-image: var(--tno-glyph);
+  background-size: 100% 100%;
+  pointer-events: none;
+}
+
+.game-text-colored .tno-bitmap-ink {
+  background-color: var(--game-text-color);
+  background-blend-mode: multiply;
+  mask: var(--tno-glyph) center / 100% 100%;
+}
 
 @media (pointer: coarse) {
   .tno-super-event-panel #super-event-continue { min-height: 44px; }

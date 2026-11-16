@@ -4614,6 +4614,7 @@ pub fn run() {
             super_events::load_tfr_menu_art,
             super_events::load_tfr_super_event_skin,
             super_events::load_tno_super_event_skin,
+            super_events::load_tno_super_event_glyphs,
             load_focus_image
         ])
         .run(tauri::generate_context!())
