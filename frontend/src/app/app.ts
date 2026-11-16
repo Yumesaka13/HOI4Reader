@@ -1,11 +1,13 @@
 import { A11yModule } from '@angular/cdk/a11y';
+import { BreakpointObserver } from '@angular/cdk/layout';
 import { ChangeDetectorRef, Component, HostListener, inject, OnInit } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { projectForeignFocuses } from './foreign-focus-calendar';
 import { evaluateCondition, ScriptCondition } from './script-condition';
 import { UI_TEXT } from './ui-text';
 import { FormsModule } from '@angular/forms';
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
@@ -20,22 +22,59 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { map } from 'rxjs';
 
-type Page = 'home' | 'mods' | 'countries' | 'chapters' | 'focus-choice' | 'reader' | 'settings';
+type Page = 'home' | 'mods' | 'countries' | 'country-intro' | 'chapters' | 'focus-choice' | 'reader' | 'settings' | 'music' | 'search';
 type Lang = 'english' | 'simp_chinese' | 'traditional_chinese' | 'japanese';
 type MusicTransition = 'interrupt' | 'queue';
-type ReaderTheme = 'material' | 'tfr';
+type ReaderTheme = 'material' | 'tfr' | 'tno';
+type ThemePreference = ReaderTheme | 'auto';
 
 interface ModInfo {
+  parent_name?: string | null;
   name: string;
   path: string;
   workshop_id: string;
   image_path?: string | null;
 }
 
+interface Discovery {
+  game_path: string;
+  workshop_path: string;
+  mods: ModInfo[];
+}
+
 interface SuperEventTrack {
   title: string;
   path: string;
+}
+
+interface RememberedTrack extends SuperEventTrack {
+  mod: string;
+}
+
+interface DownloadProgress {
+  received: number;
+  total: number | null;
+  installing: boolean;
+}
+
+interface SearchDocument {
+  item: Chapter | TimelineItem;
+  fields: SearchField[];
+}
+
+interface SearchField {
+  kind: 'title' | 'description' | 'option';
+  raw: string;
+  text: string;
+  normalized: string;
+}
+
+interface SearchResult {
+  item: Chapter | TimelineItem;
+  excerpt: string;
+  match?: SearchField;
 }
 
 type MusicEffect = { kind: 'play'; track: SuperEventTrack; recipient?: string | null } |
@@ -44,6 +83,16 @@ type MusicEffect = { kind: 'play'; track: SuperEventTrack; recipient?: string | 
 interface TfrSuperEventSkin {
   frame: string | null;
   button: string | null;
+}
+
+interface TnoSuperEventSkin {
+  frame: string | null;
+  title: string | null;
+  quote: string | null;
+  button: string | null;
+  nuclear_frame: string | null;
+  nuclear_title: string | null;
+  quote_font: string | null;
 }
 
 interface SuperEvent {
@@ -57,6 +106,8 @@ interface SuperEvent {
 
 interface Country {
   flag_image?: string | null;
+  major_order?: number | null;
+  chapter_indices?: number[];
   tag: string;
   name: string;
   chapter_count: number;
@@ -138,6 +189,7 @@ interface Chapter {
 }
 
 interface StoryOption {
+  effect_preview?: { lines: { text: string; context: string[] }[]; incomplete: boolean };
   music?: MusicEffect[];
   mission_time_changes?: [string, number][];
   mission_activations?: string[];
@@ -271,6 +323,12 @@ interface TimelineItem {
 }
 
 interface ScanResult {
+  inline_assets?: Record<string, string>;
+  text_colors?: Record<string, string>;
+  opening_notes?: Record<string, { text: string; images: string[] }[]>;
+  country_names?: Pick<Country, 'name' | 'tag' | 'major_order'>[];
+  has_secondary_countries?: boolean;
+  cache_warning?: string | null;
   wartime_hooks?: WartimeHook[];
   war_news_missions?: Record<string, string[]>;
   american_crisis_anchor?: string | null;
@@ -303,7 +361,10 @@ interface Saved {
   last_mod: string;
   language: Lang;
   music_transition: MusicTransition;
-  theme: ReaderTheme;
+  theme: ThemePreference;
+  theme_preference_set?: boolean;
+  last_mod_theme?: ReaderTheme;
+  music_history?: RememberedTrack[];
   route_history?: RouteCheckpoint[];
   option_due_days?: Record<string, number>;
   option_estimated_days?: Record<string, number>;
@@ -362,7 +423,7 @@ const emptySaved: Saved = {
   last_mod: '',
   language: 'english',
   music_transition: 'interrupt',
-  theme: 'material',
+  theme: 'auto',
 };
 
 @Component({
@@ -387,15 +448,48 @@ const emptySaved: Saved = {
     MatSlideToggleModule,
   ],
   templateUrl: './app.html',
-  styleUrls: ['./app.scss', './focus-picker.scss'],
+  styleUrls: ['./app.scss', './focus-picker.scss', './app-mobile.scss', './library.scss'],
 })
 export class App implements OnInit {
+  private readonly breakpoints = inject(BreakpointObserver);
+  readonly compactNavigation = toSignal(this.breakpoints.observe('(max-width: 760px)').pipe(map((state) => state.matches)));
+  readonly touchEffects = toSignal(this.breakpoints.observe('(hover: none)').pipe(map((state) => state.matches)));
+  readonly android = /Android/i.test(navigator.userAgent);
+  importingArchive = false;
+  showDownloadForm = false;
+  downloadUrl = '';
+  downloadProgress: DownloadProgress | null = null;
+  searchQuery = '';
+  searchResults: SearchResult[] = [];
+  searchCount = 0;
+  private searchDocuments: SearchDocument[] | null = null;
+  private searchLimit = 40;
+  searchPreview = false;
+  private searchMatch?: SearchField;
+  effectTooltip: { text: string; x: number; y: number; left: boolean; above: boolean } | null = null;
+  private inlineAssets: Record<string, string> = {};
+  private textColors: Record<string, string> = {};
+  private readonly inlineImages = new Map<string, string>();
+  private readonly gameTextCache = new Map<string, { text: string; color?: string; icon?: string; flag?: boolean }[]>();
   private readonly changeDetector = inject(ChangeDetectorRef);
   page: Page = 'home';
   saved: Saved = { ...emptySaved };
   private startDate: string | null = null;
   mods: ModInfo[] = [];
   countries: Country[] = [];
+  private openingNotes: NonNullable<ScanResult['opening_notes']> = {};
+  countryPreview: Country[] = [];
+  hasSecondaryCountries = false;
+  secondaryIndexPending = false;
+  cacheWarning = '';
+  private allIndexedCountries: Country[] | null = null;
+  private countryNames = new Map<string, string>();
+  pendingCountryTag: string | null = null;
+  private loadedScanKey: string | null = null;
+  private activeScan: { key: string; result: Promise<boolean> } | null = null;
+  private scanVersion = 0;
+  private sortedCountrySource: Country[] | null = null;
+  private sortedCountries: Country[] = [];
   chapters: Chapter[] = [];
   timeline: TimelineItem[] = [];
   diagnostics: string[] = [];
@@ -414,12 +508,14 @@ export class App implements OnInit {
   superEventImage = '';
   superEventImageUnavailable = false;
   superEventSkin: TfrSuperEventSkin | null = null;
+  tnoSuperEventSkin: TnoSuperEventSkin | null = null;
   bgmNotice = '';
   audioStatus = '';
   audioNeedsGesture = false;
   private superEventContinuation: (() => void) | null = null;
   private superEventTrigger: HTMLElement | null = null;
   private readonly tfrSuperEventSkins = new Map<string, Promise<TfrSuperEventSkin | null>>();
+  private readonly tnoSuperEventSkins = new Map<string, Promise<TnoSuperEventSkin | null>>();
   private readonly audioQueue: SuperEventTrack[] = [];
   private playingAudio: HTMLAudioElement | null = null;
   private playingTrack: SuperEventTrack | null = null;
@@ -436,10 +532,12 @@ export class App implements OnInit {
     this.superEventImage = '';
     this.superEventImageUnavailable = false;
     this.superEventSkin = null;
+    this.tnoSuperEventSkin = null;
     this.superEventContinuation = continuation ?? null;
     this.changeDetector.markForCheck();
     setTimeout(() => document.getElementById('super-event-continue')?.focus(), 0);
-    if (this.saved.theme === 'tfr') void this.loadTfrSuperEventSkin(scene);
+    if (this.theme === 'tfr') void this.loadTfrSuperEventSkin(scene);
+    if (this.theme === 'tno') void this.loadTnoSuperEventSkin(scene);
     if (scene.image_path && this.selectedMod) {
       void invoke<string | null>('load_super_event_image', {
         modPath: this.selectedMod.path,
@@ -485,6 +583,38 @@ export class App implements OnInit {
     }
   }
 
+  get tnoNuclearSuperEvent() {
+    return this.superEvent?.id === 'SE_NUCLEAR_WAR';
+  }
+
+  private async loadTnoSuperEventSkin(scene: SuperEvent) {
+    const selected = this.selectedMod;
+    const path = selected && this.themeForMod(selected.workshop_id, selected.name) === 'tno'
+      ? selected.path
+      : this.mods.find((mod) => mod.workshop_id === '2438003901')?.path ?? selected?.path;
+    if (!path) return;
+    let request = this.tnoSuperEventSkins.get(path);
+    if (!request) {
+      request = invoke<TnoSuperEventSkin | null>('load_tno_super_event_skin', { modPath: path })
+        .then((skin) => {
+          if (skin?.quote_font && typeof FontFace !== 'undefined') {
+            const font = new FontFace('TNO Super Event Quote', `url(${JSON.stringify(convertFileSrc(skin.quote_font))})`);
+            void font.load().then((loaded) => document.fonts.add(loaded)).catch(() => {});
+          }
+          return skin;
+        }).catch(() => {
+          this.tnoSuperEventSkins.delete(path);
+          return null;
+        });
+      this.tnoSuperEventSkins.set(path, request);
+    }
+    const skin = await request;
+    if (this.superEvent === scene) {
+      this.tnoSuperEventSkin = skin;
+      this.changeDetector.markForCheck();
+    }
+  }
+
   closeSuperEvent() {
     const continuation = this.superEventContinuation;
     const trigger = this.superEventTrigger;
@@ -523,10 +653,27 @@ export class App implements OnInit {
     this.persist();
   }
 
-  setTheme(theme: ReaderTheme) {
-    this.saved.theme = theme;
-    document.documentElement.dataset['readerTheme'] = theme;
+  get theme(): ReaderTheme {
+    return this.saved.theme === 'auto'
+      ? (this.saved.last_mod_theme ?? this.themeForMod('', this.saved.last_mod))
+      : this.saved.theme;
+  }
+
+  private themeForMod(id: string, name: string): ReaderTheme {
+    if (['3350890356', '3609728809'].includes(id) || /the fire rises/i.test(name)) return 'tfr';
+    if (['2438003901', '3256452254'].includes(id) || /the new order|道阻且长|道阻且長/i.test(name)) return 'tno';
+    return 'material';
+  }
+
+  private applyTheme() {
+    document.documentElement.dataset['readerTheme'] = this.theme;
     void this.loadTfrMenuArt();
+  }
+
+  setTheme(theme: ThemePreference) {
+    this.saved.theme = theme;
+    this.saved.theme_preference_set = true;
+    this.applyTheme();
     this.persist();
   }
 
@@ -534,7 +681,7 @@ export class App implements OnInit {
   private tfrMenuArtPath = '';
 
   private async loadTfrMenuArt() {
-    if (this.saved.theme !== 'tfr') return;
+    if (this.theme !== 'tfr') return;
     const path = this.mods.find((mod) => mod.workshop_id === '3350890356')?.path ?? this.selectedMod?.path;
     if (!path || path === this.tfrMenuArtPath) return;
     this.tfrMenuArtPath = path;
@@ -556,9 +703,28 @@ export class App implements OnInit {
     this.playingTrack = null;
     clearTimeout(this.bgmTimer);
     this.bgmNotice = '';
+    this.audioNeedsGesture = false;
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
+  }
+
+  get musicHistory() {
+    return this.saved.music_history ?? [];
+  }
+
+  isPlayingTrack(track: SuperEventTrack) {
+    return this.playingTrack?.path === track.path;
+  }
+
+  replayTrack(track: RememberedTrack) {
+    this.audioQueue.length = 0;
+    const alreadyPlaying = this.isPlayingTrack(track) && !this.audioNeedsGesture;
+    this.stopPlayingAudio();
+    this.audioStatus = '';
+    if (alreadyPlaying) return;
+    this.audioQueue.push(track);
+    this.playNextSuperEventAudio();
   }
 
   private playScriptedMusic(effects: MusicEffect[] = [], owner = this.saved.tag, day = this.routeDay) {
@@ -614,6 +780,11 @@ export class App implements OnInit {
       if (this.playingAudio !== audio) return;
       this.audioNeedsGesture = false;
       this.audioStatus = '';
+      const played = this.musicHistory.find((item) => item.path === track.path);
+      const mod = played?.mod || this.selectedMod?.name || this.saved.last_mod;
+      this.saved.music_history = [{ title: track.title, path: track.path, mod },
+        ...this.musicHistory.filter((item) => item.path !== track.path)].slice(0, 100);
+      this.persist();
       clearTimeout(this.bgmTimer);
       this.bgmNotice = track.title;
       this.bgmTimer = setTimeout(() => {
@@ -682,24 +853,41 @@ export class App implements OnInit {
     return this.mods.filter((mod) => mod.name.toLocaleLowerCase().includes(query));
   }
 
+  get countryIndexPending() {
+    return this.activeScan !== null;
+  }
+
+  get offersSecondaryCountries() {
+    return this.hasSecondaryCountries || this.countryPreview.some((country) => country.major_order != null);
+  }
+
+  get listedCountries() {
+    if (this.showAllCountries && this.allIndexedCountries) return this.allIndexedCountries;
+    return this.countries.length ? this.countries : this.countryPreview;
+  }
+
   get visibleCountries() {
     const query = this.countryQuery.trim().toLocaleLowerCase();
-    return this.countries
-      .filter(
-        (country) =>
-          (this.showAllCountries || country.chapter_count > 0 || country.story_count > 0) &&
-          (!query ||
-            country.tag.toLocaleLowerCase().includes(query) ||
-            country.name.toLocaleLowerCase().includes(query)),
-      )
-      .sort(
+    const countries = this.listedCountries;
+    if (countries !== this.sortedCountrySource) {
+      this.sortedCountrySource = countries;
+      this.sortedCountries = [...countries].sort(
         (a, b) =>
+          (a.major_order ?? Number.MAX_SAFE_INTEGER) - (b.major_order ?? Number.MAX_SAFE_INTEGER) ||
           b.chapter_count + b.story_count - (a.chapter_count + a.story_count) ||
           a.name.localeCompare(b.name),
       );
+    }
+    return this.sortedCountries.filter(
+      (country) =>
+        (country.major_order != null || this.countryIndexPending || this.showAllCountries || country.chapter_count > 0 || country.story_count > 0) &&
+        (!query || country.tag.toLocaleLowerCase().includes(query) || country.name.toLocaleLowerCase().includes(query)),
+    );
   }
 
   get countryChapters() {
+    const country = (this.allIndexedCountries ?? this.countries).find(({ tag }) => tag === this.saved.tag);
+    if (country?.chapter_indices) return country.chapter_indices.map((index) => this.chapters[index]);
     return this.chapters.filter((chapter) => this.focusBelongsTo(chapter, this.saved.tag));
   }
 
@@ -2078,12 +2266,9 @@ export class App implements OnInit {
   }
 
   get continuationLabel() {
-    if (
-      (!this.currentOptions.length && !this.selectedOption && this.storyOptions.length) ||
-      this.nextDueStory ||
-      this.nextLinkedStory
-    )
-      return '继续剧情';
+    const response = this.currentOptions[0];
+    if (response) return response.text;
+    if (this.nextDueStory || this.nextLinkedStory) return '继续剧情';
     if (this.focusCandidates.length) return '选择下一项国策';
     if (this.nextDevelopmentDay !== null) return '继续推进日历';
     return '查看剧情线索';
@@ -2092,8 +2277,9 @@ export class App implements OnInit {
   async continueRoute() {
     if (this.storyPreview || this.currentConfirmation) return;
     if (this.applyReaderDecisions()) return;
-    if (!this.currentOptions.length && !this.selectedOption && this.storyOptions.length) {
-      await this.chooseStoryOption(this.storyOptions[0], false);
+    const response = this.currentOptions[0];
+    if (response) {
+      if (!this.hasStoryBranches) await this.chooseStoryOption(response, false);
       return;
     }
     this.advanceAutomaticDecisions();
@@ -2388,7 +2574,100 @@ export class App implements OnInit {
   }
 
   get currentOptions() {
-    const options = this.storyOptions;
+    return this.selectedOption ? [] : this.storyOptions;
+  }
+
+  optionTooltip(option: StoryOption | undefined): string {
+    const preview = option?.effect_preview;
+    if (!preview) return '';
+    const labels: Record<string, string> = {
+      '@conditional': '满足条件时', '@otherwise': '否则', '@random': '随机效果', '@scoped': '依游戏对象而定',
+    };
+    const lines = preview.lines.map(({ text, context }) =>
+      context.length ? `${context.map((key) => key.startsWith('@active-mission:')
+        ? this.t('任务「{0}」进行时', key.slice('@active-mission:'.length))
+        : labels[key] ? this.t(labels[key]) : key).join(' · ')} — ${text}` : text,
+    );
+    if (preview.incomplete) lines.push(this.t('部分效果需要游戏状态才能显示。'));
+    return lines.join('\n');
+  }
+
+  showEffectTooltip(event: MouseEvent | FocusEvent, option: StoryOption | undefined) {
+    if (this.touchEffects() || ('pointerType' in event && event.pointerType === 'touch')) return;
+    if (!(event instanceof MouseEvent) && this.effectTooltip) return;
+    const text = this.optionTooltip(option);
+    if (!text) return;
+    const element = event.currentTarget as HTMLElement;
+    const bounds = event instanceof MouseEvent ? null : element.getBoundingClientRect();
+    const x = bounds ? bounds.left + bounds.width / 2 : (event as MouseEvent).clientX;
+    const y = bounds ? bounds.bottom : (event as MouseEvent).clientY;
+    const left = x > window.innerWidth * 0.57;
+    const above = y > window.innerHeight * 0.55;
+    this.effectTooltip = { text, x: x + (left ? -14 : 14), y: y + (above ? -14 : 16), left, above };
+  }
+
+  plainGameText(text: string): string {
+    return this.gameText(text).map((token) => token.text).join('');
+  }
+
+  gameText(text: string) {
+    const cached = this.gameTextCache.get(text);
+    if (cached) return cached;
+    const tokens: { text: string; color?: string; icon?: string; flag?: boolean }[] = [];
+    const pattern = /§([A-Za-z0-9!])|£([A-Za-z0-9_]+)(?:\|\d+)?|(?<![\w@])@([A-Z0-9]{3})(?!\w)|\[([A-Za-z0-9_]+)\.(GetFlag|GetName)\]|\[\?[^\]\n]+\]/g;
+    let cursor = 0;
+    let color: string | undefined;
+    const fallback: Record<string, string> = { G: '#51cc73', R: '#ff6969', Y: '#ffd45a', H: '#ffd45a', C: '#46dbff', O: '#ffa15d', W: '#fff' };
+    for (const match of text.matchAll(pattern)) {
+      const position = match.index ?? 0;
+      if (position > cursor) tokens.push({ text: text.slice(cursor, position), color });
+      if (match[1]) color = match[1] === '!' ? undefined : this.textColors[match[1]] ?? fallback[match[1]];
+      else if (match[2]) {
+        const name = match[2].toLowerCase();
+        const sprite = this.inlineAssets[name] ?? this.inlineAssets[`gfx_${name}`];
+        const tag = /^(?:gfx_)?flag_([a-z0-9]{3})$/.exec(name)?.[1]?.toUpperCase();
+        if (!sprite && tag) tokens.push({ text: tag, color, icon: `flag:${tag}`, flag: true });
+        else tokens.push({ text: match[2].replace(/^GFX_/i, '').replaceAll('_', ' '), color, icon: sprite });
+      } else if (match[3] || match[4]) {
+        const raw = (match[3] || match[4]).toUpperCase();
+        const tag = raw === 'ROOT' || raw === 'THIS' ? this.saved.tag : raw;
+        if (match[5] === 'GetName') tokens.push({ text: this.countryNames.get(tag) || tag || raw, color });
+        else tokens.push({ text: tag || raw, color, icon: /^[A-Z0-9]{3}$/.test(tag) ? `flag:${tag}` : undefined, flag: true });
+      } else tokens.push({ text: '…', color });
+      cursor = position + match[0].length;
+    }
+    if (cursor < text.length) tokens.push({ text: text.slice(cursor), color });
+    if (this.gameTextCache.size >= 256) this.gameTextCache.clear();
+    this.gameTextCache.set(text, tokens);
+    return tokens;
+  }
+
+  inlineImage(icon: string): string {
+    if (!icon.startsWith('flag:') && /\.(png|webp|gif|jpe?g)$/i.test(icon)) return this.imageSource(icon);
+    const existing = this.inlineImages.get(icon);
+    if (existing !== undefined) return existing;
+    const modPath = this.selectedMod?.path;
+    if (!modPath) return '';
+    this.inlineImages.set(icon, '');
+    const request = icon.startsWith('flag:')
+      ? invoke<string | null>('load_inline_flag', { modPath, gamePath: this.saved.game_path, tag: icon.slice(5) })
+      : invoke<string | null>('load_super_event_image', { modPath, imagePath: icon });
+    const version = this.scanVersion;
+    void request.then((image) => {
+      if (version !== this.scanVersion) return;
+      this.inlineImages.set(icon, image ?? '');
+      this.changeDetector.markForCheck();
+    }).catch(() => {});
+    return '';
+  }
+
+  get countryOpeningNotes() {
+    return this.openingNotes[this.saved.tag] ?? [];
+  }
+
+  get hasStoryBranches() {
+    const options = this.currentOptions;
+    if (options.length < 2) return false;
     const signatures = new Set(
       options.map((option) =>
         JSON.stringify({
@@ -2405,6 +2684,8 @@ export class App implements OnInit {
           calls: (option.event_calls ?? []).filter(([id]) =>
             this.optionAppliesToCountry(option, id) && this.timelineById.has(id.toLowerCase()),
           ),
+          foreign: (option.foreign_events ?? []).filter(({ target }) => this.timelineById.has(target.toLowerCase())),
+          flags: option.flag_changes,
           missions: option.mission_activations,
           missionTime: option.mission_time_changes,
           conditional: option.conditional_routes,
@@ -2415,7 +2696,7 @@ export class App implements OnInit {
         }),
       ),
     );
-    return signatures.size > 1 ? options : [];
+    return signatures.size > 1;
   }
 
   private optionAppliesToCountry(option: StoryOption, id: string) {
@@ -2553,6 +2834,7 @@ export class App implements OnInit {
   }
 
   get currentStoryTitle() {
+    if (this.searchPreview && this.searchMatch?.kind === 'title') return this.searchMatch.raw;
     const item = this.current;
     if (item && 'kind' in item && item.mission?.shared_resolution) {
       return item.id === 'second_nato_war_mission' ? '第二次欧洲战争的结局' : '第三次欧洲战争的结局';
@@ -2562,6 +2844,7 @@ export class App implements OnInit {
   }
 
   get currentStoryDescription() {
+    if (this.searchPreview && this.searchMatch?.kind === 'description') return this.searchMatch.raw;
     const item = this.current;
     if (item && 'kind' in item && item.mission?.shared_resolution) return '请选择这场战事的结果，阅读随后发生的新闻与事件。';
     if (this.currentForeignMission) return '请选择这场战事的结果，阅读随后发生的新闻与事件。';
@@ -2632,9 +2915,11 @@ export class App implements OnInit {
       (
         {
           event: '国家事件',
+          focus: '国策',
           news: '国际新闻',
           decision: '决议',
           mission: '限时任务',
+          'opening-note': '开局提示',
         } as Record<string, string>
       )[kind] || '剧情'
     );
@@ -2668,15 +2953,17 @@ export class App implements OnInit {
         ...JSON.parse(localStorage.getItem('hoi4reader') || '{}'),
       } as Saved;
       if (this.saved.music_transition !== 'queue') this.saved.music_transition = 'interrupt';
-      this.saved.theme = this.saved.theme === 'tfr' ? 'tfr' : 'material';
+      if (!['auto', 'material', 'tfr', 'tno'].includes(this.saved.theme) ||
+          (!this.saved.theme_preference_set && this.saved.theme === 'material')) this.saved.theme = 'auto';
+      if (!['material', 'tfr', 'tno'].includes(this.saved.last_mod_theme ?? '')) this.saved.last_mod_theme = undefined;
       if (!this.langOptions.some(({ value }) => value === this.saved.language)) this.saved.language = 'english';
       document.documentElement.lang = this.readerLanguage;
-      document.documentElement.dataset['readerTheme'] = this.saved.theme;
+      document.documentElement.dataset['readerTheme'] = this.theme;
       this.saved.read_focus_ids ||= [];
       this.saved.excluded_focus_ids ||= [];
       this.saved.read_story_ids ||= [];
       this.saved.focus_completion_days ||= {};
-      const discovery = await invoke<any>('discover');
+      const discovery = await invoke<Discovery>('discover');
       this.saved.game_path ||= discovery.game_path;
       this.saved.workshop_path ||= discovery.workshop_path;
       this.mods = discovery.mods || [];
@@ -2719,7 +3006,7 @@ export class App implements OnInit {
   async refreshMods() {
     this.loading = true;
     try {
-      const discovery = await invoke<any>('discover');
+      const discovery = await invoke<Discovery>('discover');
       this.saved.game_path = discovery.game_path || this.saved.game_path;
       this.saved.workshop_path = discovery.workshop_path || this.saved.workshop_path;
       this.mods = this.saved.workshop_path
@@ -2737,19 +3024,62 @@ export class App implements OnInit {
     }
   }
 
-  async scan() {
-    if (!this.selectedMod) return;
+  scan(force = false): Promise<boolean> {
+    if (!this.selectedMod) return Promise.resolve(false);
+    const { path } = this.selectedMod;
+    const { language } = this.saved;
+    const key = JSON.stringify([path, language, this.saved.game_path]);
+    if (this.activeScan?.key === key) return this.activeScan.result;
+    if (!force && this.loadedScanKey === key) return Promise.resolve(true);
+    if (this.loadedScanKey !== key) {
+      this.countries = [];
+      this.hasSecondaryCountries = false;
+    }
+    this.allIndexedCountries = null;
+    this.secondaryIndexPending = false;
+    this.cacheWarning = '';
+    this.loadedScanKey = null;
+    this.countryPreview = [];
+    this.pendingCountryTag = null;
     this.loading = true;
     this.error = '';
+    const version = ++this.scanVersion;
+    const result = Promise.resolve().then(() => this.runScan(path, language, key, version, force));
+    this.activeScan = { key, result };
+    this.changeDetector.markForCheck();
+    return result;
+  }
+
+  private async runScan(path: string, language: Lang, key: string, version: number, force: boolean): Promise<boolean> {
+    if (version !== this.scanVersion) return false;
     try {
-      const result = await invoke<ScanResult>('scan_mod', {
-        path: this.selectedMod.path,
-        language: this.saved.language,
+      const onCountries = new Channel<Pick<Country, 'tag' | 'name' | 'major_order'>[]>((countries) => {
+        if (version !== this.scanVersion || !this.activeScan) return;
+        this.countryPreview = countries.map((country) => ({ ...country, chapter_count: 0, story_count: 0 }));
+        this.changeDetector.markForCheck();
       });
+      const result = await invoke<ScanResult>('scan_mod', {
+        path,
+        language,
+        gamePath: this.saved.game_path,
+        force,
+        onCountries,
+      });
+      if (version !== this.scanVersion) return false;
       this.startDate = result.start_date;
       this.countries = result.countries;
+      this.inlineAssets = result.inline_assets ?? {};
+      this.textColors = result.text_colors ?? {};
+      this.inlineImages.clear();
+      this.gameTextCache.clear();
+      this.openingNotes = result.opening_notes ?? {};
+      this.countryNames = new Map((result.country_names ?? result.countries).map(({ tag, name }) => [tag, name]));
+      this.hasSecondaryCountries = result.has_secondary_countries ?? false;
+      this.cacheWarning = result.cache_warning ?? '';
       this.chapters = result.chapters;
       this.timeline = result.timeline || [];
+      this.searchDocuments = null;
+      if (this.page === 'search') this.updateSearch();
       this.initialCountryFlags = result.initial_country_flags ?? {};
       this.defaultGameRules = result.default_game_rules ?? {};
       this.greatAsianWarStart = result.great_asian_war_start ?? null;
@@ -2780,11 +3110,56 @@ export class App implements OnInit {
       }
       this.restoreTaiwanLoss();
       this.restoreEnvironmentalOutcome();
+      this.loadedScanKey = key;
+      return true;
     } catch (error) {
-      this.error = String(error);
+      if (version === this.scanVersion) this.error = String(error);
+      return false;
     } finally {
-      this.loading = false;
-      this.changeDetector.markForCheck();
+      if (version === this.scanVersion) {
+        const pending = this.countries.find((country) => country.tag === this.pendingCountryTag);
+        this.activeScan = null;
+        this.loading = false;
+        this.countryPreview = [];
+        this.pendingCountryTag = null;
+        if (this.loadedScanKey === key && this.page === 'countries') {
+          if (pending) this.chooseCountry(pending);
+          else if (this.showAllCountries) void this.loadSecondaryCountries();
+        }
+        this.changeDetector.markForCheck();
+      }
+    }
+  }
+
+  setShowAllCountries(enabled: boolean) {
+    this.showAllCountries = enabled;
+    if (enabled) void this.loadSecondaryCountries();
+  }
+
+  private async loadSecondaryCountries() {
+    if (!this.hasSecondaryCountries || !this.loadedScanKey || !this.selectedMod ||
+      this.allIndexedCountries || this.secondaryIndexPending) return;
+    const version = this.scanVersion;
+    this.secondaryIndexPending = true;
+    this.changeDetector.markForCheck();
+    try {
+      const result = await invoke<{ countries: Country[]; cache_warning: string | null }>('index_secondary_countries', {
+        path: this.selectedMod.path,
+        language: this.saved.language,
+      });
+      if (version !== this.scanVersion) return;
+      this.allIndexedCountries = [...this.countries, ...result.countries];
+      if (result.cache_warning) this.cacheWarning = result.cache_warning;
+    } catch (error) {
+      if (version === this.scanVersion) {
+        this.showAllCountries = false;
+        this.error = String(error);
+      }
+    } finally {
+      if (version === this.scanVersion) {
+        this.secondaryIndexPending = false;
+        this.changeDetector.markForCheck();
+      }
     }
   }
 
@@ -3318,6 +3693,7 @@ export class App implements OnInit {
   }
 
   async chooseMod(mod: ModInfo) {
+    if (this.importingArchive) return;
     this.saved.confirmations = {};
     this.saved.wartime_starts = {};
     this.saved.route_history = [];
@@ -3344,14 +3720,26 @@ export class App implements OnInit {
     this.countryQuery = '';
     this.showAllCountries = false;
     this.persist();
-    await this.scan();
     this.setPage('countries');
+    await this.scan();
   }
 
   chooseCountry(country: Country) {
+    if (this.countryIndexPending) {
+      this.pendingCountryTag = country.tag;
+      return;
+    }
     const changedCountry = this.saved.tag !== country.tag;
     this.selectedCountry = country;
+    this.gameTextCache.clear();
     this.saved.tag = country.tag;
+    if (this.selectedMod) {
+      this.saved.last_mod_theme = this.themeForMod(
+        this.selectedMod.workshop_id || this.selectedMod.path.split(/[\\/]/).pop() || '',
+        this.selectedMod.name,
+      );
+      this.applyTheme();
+    }
     this.saved.focus_id = '';
     this.saved.last_kind = 'focus';
     if (changedCountry) {
@@ -3375,7 +3763,16 @@ export class App implements OnInit {
     this.saved.route_day = Math.max(this.saved.route_day || 0, this.openingWindowDays);
     this.current = null;
     this.persist();
-    this.openRoutePage();
+    if (this.countryOpeningNotes.length) this.setPage('country-intro');
+    else this.openRoutePage();
+  }
+
+  startCountryReading() {
+    this.advanceAutomaticDecisions();
+    this.schedulePeriodicStories();
+    const opening = this.nextDueStory;
+    if (opening) void this.readStory(opening);
+    else this.openRoutePage();
   }
 
   get canUndoRoute() {
@@ -3466,10 +3863,87 @@ export class App implements OnInit {
     this.storyPreview = true;
   }
 
+  get searchPreviewOptions() {
+    return this.searchPreview && this.current && 'kind' in this.current ? this.current.options : [];
+  }
+
+  async openSearch() {
+    this.setPage('search');
+    if (await this.scan() && this.page === 'search') this.updateSearch();
+    this.changeDetector.markForCheck();
+  }
+
+  private normalizeSearch(text: string) {
+    return text.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  private openingSearchEntries(): TimelineItem[] {
+    return Object.entries(this.openingNotes).flatMap(([tag, notes]) => notes
+      .filter((note) => note.text)
+      .map((note, index) => ({
+        id: `opening:${tag}:${index}`, kind: 'opening-note', country_tag: tag,
+        title: this.countryNames.get(tag) ?? tag, description: note.text, image_path: note.images[0] ?? null,
+        source: this.t('开局提示'), date: null, timing: '', start_day: null, start_timing: null,
+        next_ids: [], linked_from: [], options: [],
+      })));
+  }
+
+  updateSearch(reset = true) {
+    if (reset) this.searchLimit = 40;
+    this.searchResults = [];
+    this.searchCount = 0;
+    const query = this.normalizeSearch(this.searchQuery);
+    if (!query) return;
+    const words = query.split(' ');
+    this.searchDocuments ??= [...this.chapters, ...this.timeline.filter((item) => !item.hidden), ...this.openingSearchEntries()]
+      .map((item) => {
+        const field = (kind: SearchField['kind'], raw: string) => {
+          const text = this.plainGameText(raw).replace(/\s+/g, ' ').trim();
+          return { kind, raw, text, normalized: this.normalizeSearch(text) };
+        };
+        const fields = [field('title', item.title), field('description', item.description || '')];
+        if ('kind' in item) {
+          fields.push(...(item.title_variants ?? []).map(({ text }) => field('title', text)),
+            ...(item.description_variants ?? []).map(({ text }) => field('description', text)),
+            ...item.options.map(({ text }) => field('option', text)));
+        }
+        return { item, fields };
+      });
+    for (const { item, fields } of this.searchDocuments) {
+      if (!words.every((word) => fields.some((field) => field.normalized.includes(word)))) continue;
+      this.searchCount++;
+      if (this.searchResults.length >= this.searchLimit) continue;
+      const match = fields.slice(1).find((field) => words.some((word) => field.normalized.includes(word)));
+      const excerpt = match ?? fields[1];
+      const word = words.find((value) => excerpt.normalized.includes(value));
+      const offset = word ? Math.max(0, excerpt.normalized.indexOf(word) - 32) : 0;
+      const { text } = excerpt;
+      this.searchResults.push({
+        item,
+        excerpt: (offset ? '…' : '') + text.slice(offset, offset + 156) + (text.length > offset + 156 ? '…' : ''),
+        match,
+      });
+    }
+  }
+
+  showMoreSearchResults() {
+    this.searchLimit += 40;
+    this.updateSearch(false);
+  }
+
+  previewSearchResult(result: SearchResult) {
+    this.showReader(result.item);
+    this.storyPreview = true;
+    this.searchPreview = true;
+    this.searchMatch = result.match;
+  }
+
   private showReader(item: Chapter | TimelineItem) {
     this.checkedDecisions.clear();
     this.wartimeChoices.clear();
     this.storyPreview = false;
+    this.searchPreview = false;
+    this.searchMatch = undefined;
     this.current = item;
     this.selectedOption = 'kind' in item
       ? item.options.find(({ id }) => id === this.saved.story_choices?.[this.storyKey(item)]) ?? null
@@ -3910,7 +4384,7 @@ export class App implements OnInit {
     this.openSuperEvent(item.super_event);
   }
 
-  async chooseStoryOption(option: StoryOption, recordChoice = true) {
+  async chooseStoryOption(option: StoryOption, recordChoice = this.hasStoryBranches) {
     if (this.storyPreview || this.selectedOption || !this.storyOptions.includes(option)) return;
     if (recordChoice || option.focus_tree_changes?.length) this.checkpointRoute('event');
     const current = this.current;
@@ -3979,7 +4453,7 @@ export class App implements OnInit {
       this.setPage('mods');
       return;
     }
-    await this.scan();
+    if (!(await this.scan())) return;
     this.advanceAutomaticDecisions();
     this.schedulePeriodicStories();
     if (this.saved.last_kind && this.saved.last_kind !== 'focus') {
@@ -3993,7 +4467,7 @@ export class App implements OnInit {
     }
     const chapter = this.localFocus(this.saved.focus_id);
     if (chapter) this.showReader(chapter);
-    else if (this.countries.some((country) => country.tag === this.saved.tag)) this.openRoutePage();
+    else if (this.countryNames.has(this.saved.tag)) this.openRoutePage();
     else this.setPage('countries');
   }
 
@@ -4024,13 +4498,65 @@ export class App implements OnInit {
         workshop_id: '',
         image_path: null,
       };
-      await this.scan();
       this.setPage('countries');
+      await this.scan();
     }
     this.persist();
   }
 
+  async importArchive() {
+    if (this.importingArchive) return;
+    this.importingArchive = true;
+    this.error = '';
+    try {
+      const uri = await open({ multiple: false, filters: [{ name: 'ZIP', extensions: ['zip'] }] });
+      if (typeof uri !== 'string') return;
+      const library = await invoke<Discovery>('import_archive', { uri });
+      this.applyImportedLibrary(library);
+    } catch (error) {
+      this.error = String(error);
+    } finally {
+      this.importingArchive = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  async downloadArchive() {
+    if (!this.android || this.importingArchive || !this.downloadUrl.trim()) return;
+    this.error = '';
+    this.importingArchive = true;
+    this.downloadProgress = { received: 0, total: null, installing: false };
+    const onProgress = new Channel<DownloadProgress>((progress) => {
+      if (!this.importingArchive) return;
+      this.downloadProgress = progress;
+      this.changeDetector.markForCheck();
+    });
+    try {
+      this.applyImportedLibrary(await invoke<Discovery>('download_archive', { url: this.downloadUrl.trim(), onProgress }));
+      this.downloadUrl = '';
+      this.showDownloadForm = false;
+    } catch (error) {
+      this.error = String(error);
+    } finally {
+      this.importingArchive = false;
+      this.downloadProgress = null;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  private applyImportedLibrary(library: Discovery) {
+    this.saved.game_path = library.game_path;
+    this.saved.workshop_path = library.workshop_path;
+    this.mods = library.mods;
+    this.loadedScanKey = null;
+    this.searchDocuments = null;
+    this.tfrMenuArtPath = '';
+    this.persist();
+    void this.loadTfrMenuArt();
+  }
+
   async rescan() {
+    if (this.importingArchive) return;
     if (this.saved.workshop_path) {
       this.mods = await invoke<ModInfo[]>('scan_workshop_dir', {
         root: this.saved.workshop_path,
@@ -4038,14 +4564,18 @@ export class App implements OnInit {
     } else {
       await this.refreshMods();
     }
-    if (this.selectedMod) await this.scan();
+    if (this.selectedMod) await this.scan(true);
   }
 
   setPage(page: Page) {
+    this.effectTooltip = null;
     this.changeDetector.markForCheck();
+    if (page !== 'countries') this.pendingCountryTag = null;
     if (page === 'home') void this.loadTfrMenuArt();
     if (page !== this.page) this.storyArchiveOpen = false;
     this.page = page;
+    if (this.android) this.updateAndroidHistory();
+    if (page === 'countries' && this.showAllCountries) void this.loadSecondaryCountries();
     queueMicrotask(() => {
       const content = document.querySelector<HTMLElement>('.content');
       if (content) {
@@ -4053,6 +4583,23 @@ export class App implements OnInit {
         content.scrollLeft = 0;
       }
     });
+  }
+
+  private updateAndroidHistory() {
+    const guarded = history.state?.hoi4Reader;
+    if (this.page !== 'home' && !guarded) history.pushState({ hoi4Reader: true }, '');
+    if (this.page === 'home' && guarded) history.back();
+  }
+
+  @HostListener('window:popstate')
+  onAndroidBack() {
+    if (!this.android || this.page === 'home') return;
+    if (this.superEvent) {
+      this.closeSuperEvent();
+      this.updateAndroidHistory();
+    } else {
+      this.back();
+    }
   }
 
   @HostListener('window:keydown', ['$event'])
@@ -4066,9 +4613,16 @@ export class App implements OnInit {
   }
 
   back() {
-    if (this.page === 'reader') this.openRoutePage();
+    if (this.page === 'reader' && this.searchPreview) {
+      this.searchPreview = false;
+      this.searchMatch = undefined;
+      this.storyPreview = false;
+      this.current = null;
+      this.setPage('search');
+    }
+    else if (this.page === 'reader') this.openRoutePage();
     else if (this.page === 'focus-choice') this.setPage('countries');
-    else if (this.page === 'chapters') this.setPage('countries');
+    else if (this.page === 'chapters' || this.page === 'country-intro') this.setPage('countries');
     else if (this.page === 'countries') this.setPage('mods');
     else this.setPage('home');
   }

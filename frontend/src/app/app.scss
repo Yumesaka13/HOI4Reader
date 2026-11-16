@@ -267,14 +267,33 @@ mat-nav-list a.nav-active mat-icon {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
+.country-scan-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--on-surface-variant);
+}
+.index-cache-warning {
+  padding: 12px 16px;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
 .country-card {
   position: relative;
   border-radius: 20px !important;
   min-height: 144px;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 144px;
   cursor: pointer;
   transition:
     box-shadow 0.16s,
     transform 0.16s;
+}
+.country-card:focus-visible,
+.country-card.country-pending {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 .country-card mat-card-content {
   padding: 18px;
@@ -624,6 +643,25 @@ mat-nav-list a.nav-active mat-icon {
 }
 .story-copy + .reader-note {
   margin-top: 24px;
+}
+.country-intro {
+  display: grid;
+  gap: 20px;
+  max-width: 820px;
+  margin-inline: auto;
+}
+.country-intro-card mat-card-content {
+  padding: clamp(16px, 3vw, 28px);
+}
+.country-intro-illustration {
+  display: block;
+  max-width: 100%;
+  max-height: 280px;
+  margin-top: 16px;
+  object-fit: contain;
+}
+.country-intro > button {
+  justify-self: end;
 }
 .story-options {
   display: grid;

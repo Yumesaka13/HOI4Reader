@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { clearMocks, mockConvertFileSrc } from '@tauri-apps/api/mocks';
+import type { Channel } from '@tauri-apps/api/core';
+import { clearMocks, mockConvertFileSrc, mockIPC } from '@tauri-apps/api/mocks';
 import { App } from './app';
 
 describe('App', () => {
@@ -16,11 +17,97 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
+  it('moves effect previews with the pointer and preserves colour and flag tokens', () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    const option = { id: 'sample.a', text: 'Continue', next_ids: [],
+      effect_preview: { lines: [{ text: '@JAP §G+1§!', context: [] }], incomplete: false } };
+    app.showEffectTooltip(new MouseEvent('mousemove', { clientX: 20, clientY: 30 }), option);
+    expect(app.effectTooltip).toMatchObject({ x: 34, y: 46 });
+    app.showEffectTooltip(new MouseEvent('mousemove', { clientX: 35, clientY: 50 }), option);
+    expect(app.effectTooltip).toMatchObject({ x: 49, y: 66 });
+    const tokens = app.gameText(app.effectTooltip!.text);
+    expect(tokens).toContainEqual({ text: 'JAP', flag: true, icon: 'flag:JAP', color: undefined });
+    expect(tokens).toContainEqual({ text: '+1', color: '#51cc73' });
+  });
+
+  it('shows searchable countries during indexing, opens the selected country once, and reuses the result', async () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    app.selectedMod = { name: 'Test mod', path: '/test-mod', workshop_id: '' };
+    app.setPage('countries');
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    const open = vi.spyOn(app, 'openRoutePage').mockImplementation(() => {});
+    const country = { tag: 'JAP', name: 'Japan', chapter_count: 2, story_count: 3 };
+    const index = { start_date: '2020.1.1', countries: [country], chapters: [], timeline: [], diagnostics: [],
+      country_names: [country, { tag: 'BHU', name: '不丹' }] };
+    let publish!: Channel<{ name: string; tag: string }[]>;
+    let finish!: (index: unknown) => void;
+    const backend = vi.fn((_, args) => {
+      publish = (args as { onCountries: typeof publish }).onCountries;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    mockIPC(backend);
+    try {
+      const scan = app.scan();
+      expect(app.scan()).toBe(scan);
+      await Promise.resolve();
+      publish.onmessage([{ tag: 'JAP', name: 'Japan' }, { tag: 'PRC', name: 'China' }]);
+      app.countryQuery = 'jap';
+      expect(app.visibleCountries.map(({ tag }) => tag)).toEqual(['JAP']);
+      app.chooseCountry(app.visibleCountries[0]);
+      expect(open).not.toHaveBeenCalled();
+      finish(index);
+      await expect(scan).resolves.toBe(true);
+      expect(app.selectedCountry).toEqual(country);
+      expect(app.gameText('[BHU.GetFlag]§Y[BHU.GetName]§!')).toEqual([
+        { text: 'BHU', flag: true, icon: 'flag:BHU', color: undefined },
+        { text: '不丹', color: '#ffd45a' },
+      ]);
+      expect(open).toHaveBeenCalledOnce();
+      await expect(app.scan()).resolves.toBe(true);
+      expect(backend).toHaveBeenCalledOnce();
+      const rescan = app.scan(true);
+      await Promise.resolve();
+      finish(index);
+      await expect(rescan).resolves.toBe(true);
+      expect(backend).toHaveBeenCalledTimes(2);
+    } finally {
+      clearMocks();
+    }
+  });
+
+  it('indexes minor countries only when requested and keeps the bookmark order', async () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    app.selectedMod = { name: 'Test mod', path: '/test-mod', workshop_id: '' };
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    const japan = { tag: 'JAP', name: 'Japan', chapter_count: 8, story_count: 8, major_order: 1 };
+    const america = { tag: 'USA', name: 'America', chapter_count: 1, story_count: 1, major_order: 0 };
+    const canada = { tag: 'CAN', name: 'Canada', chapter_count: 30, story_count: 30 };
+    const secondary = vi.fn(() => ({ countries: [canada], cache_warning: null }));
+    mockIPC((cmd) => cmd === 'index_secondary_countries' ? secondary() : {
+      start_date: null, countries: [japan, america], chapters: [], timeline: [], diagnostics: [],
+      has_secondary_countries: true,
+    });
+    try {
+      await app.scan();
+      expect(app.visibleCountries.map(({ tag }) => tag)).toEqual(['USA', 'JAP']);
+      expect(secondary).not.toHaveBeenCalled();
+      app.setShowAllCountries(true);
+      await vi.waitFor(() => expect(app.visibleCountries.map(({ tag }) => tag)).toEqual(['USA', 'JAP', 'CAN']));
+      app.setShowAllCountries(false);
+      expect(app.visibleCountries.map(({ tag }) => tag)).toEqual(['USA', 'JAP']);
+      app.setShowAllCountries(true);
+      expect(secondary).toHaveBeenCalledOnce();
+    } finally {
+      clearMocks();
+    }
+  });
+
   it('applies the selected theme to the document and saves it', () => {
     const app = TestBed.createComponent(App).componentInstance;
     const persist = vi.spyOn(app, 'persist').mockImplementation(() => {});
     try {
-      expect(app.saved.theme).toBe('material');
+      expect(app.saved.theme).toBe('auto');
+      expect(app.theme).toBe('material');
       app.setTheme('tfr');
       expect(document.documentElement.dataset['readerTheme']).toBe('tfr');
       expect(app.saved.theme).toBe('tfr');
@@ -29,6 +116,100 @@ describe('App', () => {
       expect(persist).toHaveBeenCalledTimes(2);
     } finally {
       delete document.documentElement.dataset['readerTheme'];
+    }
+  });
+
+  it('follows the last played mod while allowing a fixed theme', () => {
+    const app = TestBed.createComponent(App).componentInstance;
+    vi.spyOn(app, 'openRoutePage').mockImplementation(() => {});
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    app.selectedMod = { name: '道阻且长', workshop_id: '3256452254', path: '/tno-child' };
+    expect(app.theme).toBe('material');
+    app.chooseCountry({ tag: 'USA', name: 'United States', chapter_count: 1, story_count: 1 });
+    expect(app.theme).toBe('tno');
+    expect(document.documentElement.dataset['readerTheme']).toBe('tno');
+    app.setTheme('material');
+    expect(app.theme).toBe('material');
+    app.setTheme('auto');
+    expect(app.theme).toBe('tno');
+    delete document.documentElement.dataset['readerTheme'];
+  });
+
+  it('puts a TNO super event in its own panel and uses the local nuclear frame', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    app.setTheme('tno');
+    app.selectedMod = { name: 'The New Order', path: '/tno', workshop_id: '2438003901' };
+    const image = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    const backend = vi.fn((command: string) => command === 'load_tno_super_event_skin'
+      ? { frame: image, title: image, quote: image, button: image, nuclear_frame: image, nuclear_title: image }
+      : image);
+    mockIPC(backend);
+    try {
+      app.previewSuperEvent({ id: 'SE_NUCLEAR_WAR', title: 'Test event', quote: 'Quote line',
+        dismiss: 'Continue', image_path: '/tno/gfx/art.png', audio: null });
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        const panel = fixture.nativeElement.querySelector('.tno-super-event-panel') as HTMLElement;
+        expect(panel.querySelector('.tno-super-event-picture')?.getAttribute('src')).toBe(image);
+        expect(panel.querySelector('.tno-super-event-nuclear-frame')?.getAttribute('src')).toBe(image);
+        expect(panel.querySelector('blockquote')?.textContent).toContain('Quote line');
+      });
+      expect(backend).toHaveBeenCalledWith('load_tno_super_event_skin', { modPath: '/tno' });
+      (fixture.nativeElement.querySelector('#super-event-continue') as HTMLButtonElement).click();
+      expect(app.superEvent).toBeNull();
+    } finally {
+      clearMocks();
+      delete document.documentElement.dataset['readerTheme'];
+    }
+  });
+
+  it('renders flags in opening notes and previews search matches without advancing the route', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    app.saved.tag = 'CHI';
+    app.saved.focus_id = '';
+    app.selectedMod = { name: 'The Fire Rises', path: '/tfr-child', workshop_id: '3609728809' };
+    app['openingNotes'] = {
+      CHI: [{ text: '國家概況：\n[CHI.GetFlag]中華民國，與[PRC.GetFlag]中國。', images: [] }],
+    };
+    app.timeline = [{
+      kind: 'event', id: 'lookup.1', title: 'Other story', description: '', country_tag: 'CHI',
+      source: 'events.txt', timing: '', image_path: null, next_ids: [], linked_from: [],
+      date: null, start_day: null, start_timing: null,
+      options: [{ id: 'lookup.1.a', text: '考慮談判', next_ids: [] }],
+    }];
+    const flagImage = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    mockIPC((command) => command === 'load_inline_flag' ? flagImage : null);
+    try {
+      app.setPage('country-intro');
+      fixture.detectChanges();
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        const prose = fixture.nativeElement.querySelector('.country-intro .story-copy') as HTMLElement;
+        expect([...prose.querySelectorAll('img.inline-game-flag')].map((image) => image.getAttribute('alt')))
+          .toEqual(['CHI', 'PRC']);
+        expect(prose.textContent).toContain('中華民國');
+        expect(prose.textContent).not.toContain('GetFlag');
+      });
+      app.searchQuery = '國家概況';
+      app.updateSearch();
+      expect(app.searchResults.map(({ item }) => item.id)).toEqual(['opening:CHI:0']);
+      app.searchQuery = '談判';
+      app.updateSearch();
+      expect(app.searchResults.map(({ item }) => item.id)).toEqual(['lookup.1']);
+      app.previewSearchResult(app.searchResults[0]);
+      expect(app.searchPreviewOptions[0].text).toBe('考慮談判');
+      expect(app.saved.focus_id).toBe('');
+      app.back();
+      expect(app.page).toBe('search');
+    } finally {
+      clearMocks();
     }
   });
 
@@ -93,6 +274,9 @@ describe('App', () => {
       await Promise.resolve();
       expect(second.play).toHaveBeenCalledOnce();
       expect(app.bgmNotice).toBe('Second');
+      expect(app.musicHistory[0]).toMatchObject({ title: 'Second', path: 'Second.ogg' });
+      app.replayTrack(app.musicHistory[0]);
+      expect(app.isPlayingTrack(app.musicHistory[0])).toBe(false);
     } finally {
       clearMocks();
       vi.useRealTimers();
@@ -130,31 +314,57 @@ describe('App', () => {
     const app = fixture.componentInstance;
     fixture.detectChanges();
     await fixture.whenStable();
-    app.saved.tag = 'PRC';
-    app.saved.read_focus_ids = ['PRC_sample'];
+    app.saved.tag = 'JAP';
+    app.saved.read_focus_ids = ['JAP_restrict_travel'];
+    app.selectedMod = { name: 'The Fire Rises', path: '/tfr', workshop_id: '3350890356' };
     app.current = {
-      id: 'PRC_sample', title: '采取紧急措施', description: '正文。',
+      id: 'JAP_restrict_travel', title: '限制旅行', description: '正文。',
       icon: '', image_available: false, image_path: null, source: 'focus.txt',
     };
-    app.timeline = [{
-      id: 'PRC_deploy_the_pla', kind: 'decision', country_tag: 'PRC', title: '部署军队',
-      description: '[Missing translation: PRC_deploy_the_pla_desc]', date: null,
+    const countries = [['PRC', 'R', '中国'], ['SOV', 'G', '俄罗斯'], ['USA', 'C', '美国']];
+    app.timeline = countries.map(([tag, color, name]) => ({
+      id: `JAP_restrict_travel_${tag}`, kind: 'decision', country_tag: 'JAP',
+      title: `限制[${tag}.GetFlag]§${color}${name}§!游客入境`,
+      description: '[Missing translation: decision_desc]', date: null,
       timing: '', source: 'decisions.txt', image_path: null, start_day: null, start_timing: null,
-      next_ids: [], linked_from: ['focus:PRC_sample (提示关联)'], options: [],
-      decision_focuses: ['PRC_sample'],
-    }];
-    expect(app.readerDecisions.map((item) => item.id)).toEqual(['PRC_deploy_the_pla']);
-    app.setPage('reader');
-    await fixture.whenStable();
-    fixture.detectChanges();
+      next_ids: [], linked_from: ['focus:JAP_restrict_travel (提示关联)'], options: [],
+      decision_focuses: ['JAP_restrict_travel'],
+    }));
+    const flagImage = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    const backend = vi.fn((command: string) => command === 'load_inline_flag' ? flagImage : null);
+    mockIPC(backend);
+    try {
+      app.setPage('reader');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
 
-    const reader = fixture.nativeElement.querySelector('.reader-page') as HTMLElement;
-    expect(reader.querySelector('mat-checkbox')?.textContent).toContain('部署军队');
-    expect(reader.textContent).not.toContain('Missing translation');
-    expect(reader.querySelector('.reader-actions button')?.getAttribute('aria-label')).toBeTruthy();
+      const reader = fixture.nativeElement.querySelector('.reader-page') as HTMLElement;
+      const checkboxes = [...reader.querySelectorAll('mat-checkbox')];
+      expect(checkboxes).toHaveLength(3);
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        expect(reader.querySelectorAll('img.inline-game-flag')).toHaveLength(3);
+      });
+      for (const [tag, , name] of countries) {
+        const checkbox = checkboxes.find((control) => control.textContent?.includes(name));
+        expect(checkbox?.querySelector('img.inline-game-flag')?.getAttribute('src')).toBe(flagImage);
+        expect(checkbox?.querySelector('img')?.getAttribute('alt')).toBe(tag);
+        expect(checkbox?.querySelector('.game-text-colored')?.textContent).toBe(name);
+        expect(backend).toHaveBeenCalledWith('load_inline_flag', expect.objectContaining({ tag }));
+      }
+      expect(reader.textContent).not.toMatch(/GetFlag|§|Missing translation/);
+      expect(reader.querySelector('.reader-actions button')?.getAttribute('aria-label')).toBeTruthy();
+      checkboxes[0].querySelector('input')?.click();
+      expect(app.isDecisionChecked('JAP_restrict_travel_PRC')).toBe(true);
+      checkboxes[0].querySelector('input')?.click();
+      expect(app.isDecisionChecked('JAP_restrict_travel_PRC')).toBe(false);
+    } finally {
+      clearMocks();
+    }
   });
 
-  it('continues past options that differ only by a filtered notice', () => {
+  it('keeps equivalent response text visible while allowing quick continuation', async () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     app.current = {
@@ -176,7 +386,48 @@ describe('App', () => {
         { id: 'sample.1.b', text: 'Close', next_ids: [] },
       ],
     };
-    expect(app.currentOptions).toEqual([]);
+    const [first, second] = app.currentOptions;
+    expect(app.currentOptions.map(({ text }) => text)).toEqual(['Continue', 'Close']);
+    expect(app.hasStoryBranches).toBe(false);
+    const choose = vi.spyOn(app, 'chooseStoryOption').mockResolvedValue();
+    await app.continueRoute();
+    expect(choose).toHaveBeenCalledWith(first, false);
+    choose.mockClear();
+
+    second.mission_time_changes = [['mission.sample', -5]];
+    expect(app.hasStoryBranches).toBe(true);
+    await app.continueRoute();
+    expect(choose).not.toHaveBeenCalled();
+  });
+
+  it('shows an authored single response and applies it only once when clicked', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.ngOnInit = async () => {};
+    vi.spyOn(app, 'persist').mockImplementation(() => {});
+    vi.spyOn(app, 'openRoutePage').mockImplementation(() => {});
+    fixture.detectChanges();
+    app.saved.tag = 'JAP';
+    app.saved.read_story_ids = [];
+    app.saved.mission_started = { 'mission.sample': 0 };
+    app.current = {
+      id: 'sample.2', kind: 'event', country_tag: 'JAP', title: 'A letter',
+      description: 'The story continues.', date: null, timing: '', source: 'events/sample.txt',
+      image_path: null, start_day: null, start_timing: null, next_ids: [], linked_from: [],
+      options: [{ id: 'sample.2.a', text: 'File the letter', next_ids: [], mission_time_changes: [['mission.sample', -5]] }],
+    };
+    app.setPage('reader');
+    fixture.detectChanges();
+
+    const response = fixture.nativeElement.querySelector('.reader-article .story-option') as HTMLButtonElement;
+    const shortcut = fixture.nativeElement.querySelector('.reader-actions button') as HTMLButtonElement;
+    expect(response.textContent?.trim()).toBe('File the letter');
+    expect(shortcut.getAttribute('aria-label')).toBe('File the letter');
+    expect(app.saved.mission_deadline_adjustments?.['mission.sample']).toBeUndefined();
+    response.click();
+    response.click();
+    expect(app.saved.story_choices?.['event:sample.2']).toBe('sample.2.a');
+    expect(app.saved.mission_deadline_adjustments?.['mission.sample']).toBe(-5);
   });
 
   it('dates a verified random delay from its script and labels the estimate', () => {

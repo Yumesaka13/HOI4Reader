@@ -1,0 +1,53 @@
+.brand .brand-mark {
+  object-fit: contain;
+}
+.library-page {
+  max-width: 880px;
+}
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-block: 20px;
+}
+.library-search {
+  width: min(100%, 560px);
+}
+.library-results {
+  display: grid;
+  gap: 10px;
+}
+.library-results .library-result {
+  justify-content: start;
+  min-height: 52px;
+  height: auto;
+  padding: 12px 16px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.library-result-text {
+  display: grid;
+  gap: 4px;
+  color: var(--on-surface-variant);
+}
+.library-result-text strong {
+  color: var(--on-surface);
+  font-size: 1rem;
+}
+.library-result-label {
+  color: var(--primary);
+}
+.download-form {
+  max-width: 650px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  margin-block-end: 16px;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--mat-sys-corner-medium);
+}
+.download-form mat-form-field {
+  width: 100%;
+}

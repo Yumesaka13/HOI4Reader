@@ -3,9 +3,11 @@
   "private": true,
   "scripts": {
     "dev": "npm --prefix frontend start",
+    "tauri": "npm --prefix frontend exec -- tauri",
     "tauri:dev": "npm --prefix frontend exec -- tauri dev",
     "tauri:build": "npm --prefix frontend exec -- tauri build",
     "tauri:build:msi": "npm --prefix frontend exec -- tauri build --bundles msi",
+    "android:build": "node scripts/build-android.mjs",
     "frontend:build": "npm --prefix frontend run build"
   }
 }

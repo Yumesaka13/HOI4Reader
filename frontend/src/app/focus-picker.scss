@@ -146,7 +146,8 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .focus-choice-tile {
-    min-height: 240px;
+    min-height: clamp(225px, 37dvh, 320px);
+    padding-block-start: 40px;
   }
 }
 @media (hover: none) {

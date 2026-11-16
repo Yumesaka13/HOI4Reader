@@ -1,0 +1,201 @@
+@use '@angular/material' as mat;
+
+html[data-reader-theme='tno'] {
+  color-scheme: dark;
+  --tno-font: 'Aldrich', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  @include mat.theme((
+    typography: (
+      plain-family: var(--tno-font),
+      brand-family: var(--tno-font),
+    ),
+  ));
+  @include mat.theme-overrides((
+    primary: #81ebed,
+    on-primary: #0a2022,
+    primary-container: #173638,
+    on-primary-container: #b4f8f8,
+    secondary-container: #193437,
+    on-secondary-container: #d4f3f5,
+    surface: #0b1619,
+    surface-container-low: #101e22,
+    surface-container: #12262a,
+    surface-container-high: #193237,
+    surface-container-highest: #234349,
+    on-surface: #ddf3ef,
+    on-surface-variant: #a9caca,
+    outline: #70a9ae,
+    outline-variant: #315b62,
+    inverse-surface: #c8e7e5,
+    inverse-on-surface: #142426,
+    corner-small: 2px,
+    corner-medium: 2px,
+    corner-large: 2px,
+    corner-extra-large: 2px,
+    corner-full: 2px,
+  ));
+  --page: #081215;
+  --surface: var(--mat-sys-surface);
+  --surface-container: var(--mat-sys-surface-container);
+  --surface-container-low: var(--mat-sys-surface-container-low);
+  --surface-container-high: var(--mat-sys-surface-container-high);
+  --feature-surface: #11282e;
+  --primary: var(--mat-sys-primary);
+  --on-primary: var(--mat-sys-on-primary);
+  --primary-container: var(--mat-sys-primary-container);
+  --on-primary-container: var(--mat-sys-on-primary-container);
+  --on-surface: var(--mat-sys-on-surface);
+  --on-surface-variant: var(--mat-sys-on-surface-variant);
+  --outline: var(--mat-sys-outline);
+  --outline-variant: var(--mat-sys-outline-variant);
+
+  &:lang(zh-Hant) { --tno-font: 'Aldrich', 'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif; }
+  &:lang(ja) { --tno-font: 'Aldrich', 'Noto Sans CJK JP', 'Yu Gothic', sans-serif; }
+
+  body { font-family: var(--tno-font); }
+  .shell, .content, .topbar, mat-card { color: var(--on-surface); }
+  .topbar, .nav-drawer, .mobile-nav {
+    background: linear-gradient(#173137, #0d2024);
+    border-color: var(--outline-variant);
+  }
+  .topbar { border-block-end: 1px solid var(--outline-variant); }
+  .nav-drawer { border-inline-end: 1px solid var(--outline-variant); }
+  .nav-drawer a[mat-list-item], .focus-reader-image, .country-card,
+  .mod-card, .mod-card-cover, .super-event-card, .settings-card {
+    border-radius: 2px !important;
+  }
+  .page-heading h1, .reader-heading h1, .focus-choice-title {
+    color: var(--primary);
+    text-shadow: 0 0 12px #5ac3d24d;
+  }
+  .home-page {
+    background: repeating-linear-gradient(180deg, #65d4de0a 0 1px, transparent 1px 4px);
+  }
+  .page-heading {
+    border-block-end: 1px solid var(--outline-variant);
+    padding-block-end: 16px;
+  }
+  .reader-article .reader-heading h1, .reader-article .story-copy {
+    font-family: var(--tno-font);
+  }
+  .focus-choice-tile {
+    background: radial-gradient(ellipse at 50% 30%, #142f36, #0a171b 70%);
+  }
+  .focus-choice-tile:hover, .focus-choice-tile:focus-visible {
+    background: radial-gradient(ellipse at 50% 30%, #20555c, #0f2428 70%);
+  }
+}
+
+.tno-super-event-overlay {
+  padding: 16px;
+  background: #05090bd9;
+}
+
+.tno-super-event {
+  width: min(100%, 730px, max(360px, calc((100dvh - 40px) * 1.11)));
+  container-type: inline-size;
+  color: #fff;
+  text-align: center;
+}
+
+.tno-super-event-panel {
+  --tno-unit: calc(100cqw / 585);
+  position: relative;
+  isolation: isolate;
+  margin-block-start: calc(45 * var(--tno-unit));
+  aspect-ratio: 585 / 480;
+  background: #090f11;
+}
+
+.tno-super-event-panel::before,
+.tno-super-event-nuclear-title {
+  position: absolute;
+  inset: calc(-45 * var(--tno-unit)) auto auto calc(7 * var(--tno-unit));
+  width: calc(570 * var(--tno-unit));
+}
+
+.tno-super-event-panel::before {
+  content: '';
+  height: calc(128 * var(--tno-unit));
+  background: #121c20;
+  border: 1px solid #596368;
+  border-image: var(--tno-title, none) 64 fill / calc(64 * var(--tno-unit)) stretch;
+}
+
+.tno-super-event-panel h1 {
+  position: absolute;
+  z-index: 2;
+  inset: calc(-32 * var(--tno-unit)) 3% auto;
+  margin: 0;
+  font: 400 clamp(14px, 4.1cqw, 28px)/1.05 var(--tno-font, sans-serif);
+  text-shadow: 1px 1px #000, -1px 1px #000;
+}
+
+.tno-super-event-picture {
+  position: absolute;
+  inset: calc(7 * var(--tno-unit)) auto auto calc(6 * var(--tno-unit));
+  width: calc(573 * var(--tno-unit));
+  height: calc(455 * var(--tno-unit));
+  object-fit: contain;
+}
+
+.tno-super-event-frame,
+.tno-super-event-nuclear-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tno-super-event-frame {
+  border: 3px solid #555759;
+  border-block-end-width: calc(52 * var(--tno-unit));
+  border-image: var(--tno-frame, none) 71 64 / calc(71 * var(--tno-unit)) calc(64 * var(--tno-unit)) stretch;
+}
+
+.tno-super-event-quote-underlay {
+  position: absolute;
+  inset: calc(280 * var(--tno-unit)) auto auto calc(26 * var(--tno-unit));
+  width: calc(550 * var(--tno-unit));
+  height: calc(137 * var(--tno-unit));
+  background: var(--tno-quote, linear-gradient(90deg, transparent, #111b)) center / 100% 100%;
+  pointer-events: none;
+}
+
+.tno-super-event-panel blockquote {
+  position: absolute;
+  inset: calc(285 * var(--tno-unit)) calc(10 * var(--tno-unit)) calc(64 * var(--tno-unit)) calc(120 * var(--tno-unit));
+  margin: 0;
+  overflow: auto;
+  font: 400 clamp(13px, 4.1cqw, 28px)/1.09 'TNO Super Event Quote', var(--tno-font, monospace);
+  text-align: right;
+  text-shadow: 1px 1px #000, -1px 1px #000;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.tno-super-event-panel #super-event-continue {
+  position: absolute;
+  inset: auto auto calc(16 * var(--tno-unit)) 50%;
+  transform: translateX(-50%);
+  width: calc(235 * var(--tno-unit));
+  min-height: 38px;
+  height: calc(40 * var(--tno-unit));
+  padding-inline: 6px;
+  border-radius: 3px;
+  background: var(--tno-button, linear-gradient(#626663, #313738)) center / calc(221 * var(--tno-unit)) calc(36 * var(--tno-unit)) no-repeat;
+  color: #fff;
+  font: 400 clamp(13px, 3.8cqw, 24px)/1.05 'TNO Super Event Quote', var(--tno-font, monospace);
+  white-space: normal;
+  text-shadow: 1px 1px #000;
+}
+
+.tno-super-event-panel #super-event-continue:hover { filter: brightness(1.2); }
+.tno-super-event-panel #super-event-continue:focus-visible,
+.tno-super-event-panel blockquote:focus-visible { outline: 2px solid var(--primary); }
+.tno-super-event-status { font-size: 0.875rem; }
+.tno-super-event .bgm-status { margin-block-start: 12px; }
+
+@media (pointer: coarse) {
+  .tno-super-event-panel #super-event-continue { min-height: 44px; }
+}

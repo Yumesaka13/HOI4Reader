@@ -1,0 +1,113 @@
+.touch-effects {
+  color: var(--on-surface-variant);
+  font-size: 14px;
+}
+.touch-effects summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+.touch-effects div {
+  padding: 8px 12px;
+  background: var(--surface-container);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.mobile-nav {
+  display: none;
+}
+.import-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.settings-card .import-status {
+  display: flex;
+  margin-block: 12px;
+}
+.settings-card button + mat-form-field {
+  margin-block-start: 16px;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    height: 56px;
+    gap: 6px;
+    padding-inline: 12px;
+  }
+  .topbar-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    height: 56px;
+    align-items: center;
+    padding-inline: 8px;
+    background: var(--surface-container);
+    border-block-start: 1px solid var(--outline-variant);
+  }
+  .mobile-nav button {
+    height: 48px;
+  }
+  .mobile-nav .nav-active {
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+  }
+  .content {
+    height: calc(100% - 56px);
+    padding: 24px 16px;
+  }
+  .compact-navigation .content {
+    height: calc(100% - 112px);
+  }
+  .content.reading-content {
+    padding: 16px 16px 84px;
+  }
+  .reader-actions {
+    top: auto;
+    bottom: 16px;
+    transform: none;
+  }
+  .page-heading h1 {
+    font-size: clamp(28px, 8vw, 42px);
+    overflow-wrap: anywhere;
+  }
+  .list-toolbar, .country-toolbar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .list-toolbar mat-form-field, .country-toolbar mat-form-field {
+    width: 100%;
+  }
+  .mod-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  }
+  .country-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 156px), 1fr));
+  }
+  .home-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .home-stats mat-card {
+    padding: 10px;
+  }
+  .path-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-card mat-form-field {
+    max-width: 100%;
+  }
+}
+@media (max-width: 380px) {
+  .topbar mat-chip-set {
+    display: none;
+  }
+  .country-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -278,4 +278,62 @@ html[data-reader-theme='tfr'] app-root {
       }
     }
   }
+
+  @media (max-width: 600px) {
+    .home-page {
+      min-height: 0;
+      padding: 20px 14px;
+    }
+
+    .super-event-overlay {
+      padding: 12px;
+
+      .super-event-card {
+        width: 100%;
+        aspect-ratio: auto;
+        outline: 4px double #666979;
+      }
+
+      .super-event-art {
+        position: static;
+        aspect-ratio: 1001 / 639;
+      }
+
+      .tfr-super-event-frame {
+        display: none;
+      }
+
+      .super-event-copy {
+        display: grid;
+        justify-items: stretch;
+        gap: 12px;
+        position: static;
+        padding: 12px !important;
+        background: var(--tfr-metal);
+      }
+
+      .super-event-copy h1,
+      .super-event-copy blockquote,
+      .super-event-copy #super-event-continue,
+      .super-event-art-status,
+      .bgm-status {
+        position: static;
+        height: auto;
+      }
+
+      .super-event-copy h1 {
+        font-size: 20px;
+      }
+
+      .super-event-copy blockquote {
+        font-size: 15px;
+      }
+
+      .super-event-copy #super-event-continue {
+        min-height: 44px;
+        justify-self: center;
+        padding-inline: 14px;
+      }
+    }
+  }
 }

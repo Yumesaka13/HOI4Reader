@@ -9,4 +9,6 @@ dist/
 .env.*
 !.env.example
 *.local
-src-tauri/gen/
+src-tauri/gen/*
+!src-tauri/gen/android/
+hoi4reader-index/

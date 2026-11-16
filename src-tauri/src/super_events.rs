@@ -3,14 +3,15 @@ use super::{
     script_condition_in_country, script_values, top_value, ScriptCondition, STANDARD,
 };
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
 };
-use walkdir::WalkDir;
 
-#[derive(Clone, Serialize)]
+const TNO_NUCLEAR_SHEET: (u32, u32) = (573 * 28, 455);
+
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Scene {
     id: String,
     title: String,
@@ -20,13 +21,13 @@ pub struct Scene {
     audio: Option<Track>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Track {
     title: String,
     path: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MusicEffect {
     Play {
@@ -38,7 +39,7 @@ pub enum MusicEffect {
     },
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct MusicArm {
     condition: ScriptCondition,
     owner: Option<String>,
@@ -71,9 +72,42 @@ pub(super) fn local_file(base: &Path, value: &str) -> Option<PathBuf> {
         return None;
     }
     let root = base.canonicalize().ok()?;
-    let path = base.join(value.replace('\\', "/"));
+    let relative = value.replace('\\', "/");
+    let path = base.join(&relative);
+    #[cfg(not(windows))]
+    let path = if path.is_file() {
+        path
+    } else {
+        case_insensitive_asset_path(base, Path::new(&relative))?
+    };
     let resolved = path.canonicalize().ok()?;
     (resolved.starts_with(root) && resolved.is_file()).then_some(path)
+}
+
+#[cfg(not(windows))]
+fn case_insensitive_asset_path(base: &Path, relative: &Path) -> Option<PathBuf> {
+    let mut path = base.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(name) = component else {
+            return None;
+        };
+        let exact = path.join(name);
+        if exact.exists() {
+            path = exact;
+            continue;
+        }
+        let name = name.to_string_lossy();
+        let mut matching = std::fs::read_dir(&path)
+            .ok()?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case(&name));
+        let matched = matching.next()?;
+        if matching.next().is_some() {
+            return None;
+        }
+        path = matched.path();
+    }
+    Some(path)
 }
 
 fn inner(block: &str) -> &str {
@@ -92,8 +126,8 @@ impl Catalog {
         diagnostics: &mut Vec<String>,
     ) -> Self {
         let mut catalog = Self::default();
-        let tfr_loc = root.join("common/scripted_localisation/TFR_Super_Event_Scripted_Loc.txt");
-        let tno_effect = root.join("common/scripted_effects/TNO_super_events_scripted_effect.txt");
+        let tfr_loc = super::mod_layers::path(root, "common/scripted_localisation/TFR_Super_Event_Scripted_Loc.txt");
+        let tno_effect = super::mod_layers::path(root, "common/scripted_effects/TNO_super_events_scripted_effect.txt");
         let tfr = tfr_loc.is_file();
         if let Ok(script) = decode(&tno_effect) {
             catalog.tno = true;
@@ -115,17 +149,20 @@ impl Catalog {
                 }
             }
         }
-        for name in ["TFR_Super_Events.gfx", "TNO_SG_Super_Event.gfx"] {
-            let Ok(script) = decode(&root.join("interface").join(name)) else {
+        for name in ["TFR_Super_Events.gfx", "TNO_SG_Super_Event.gfx", "TNOLAR_SG_Super_Event.gfx"] {
+            let Ok(script) = decode(&super::mod_layers::path(root, &format!("interface/{name}"))) else {
                 continue;
             };
-            for sprite in blocks(&script, "spriteType = {") {
+            for sprite in blocks(&script, "spriteType = {")
+                .into_iter()
+                .chain(blocks(&script, "FrameAnimatedSpriteType = {"))
+            {
                 let name = top_value(&sprite, "name");
                 let mut texture = top_value(&sprite, "texturefile");
                 if texture.is_empty() {
                     texture = top_value(&sprite, "textureFile");
                 }
-                if let Some(path) = local_file(root, &texture) {
+                if let Some(path) = super::mod_layers::file(root, &texture) {
                     catalog.sprites.insert(name, path);
                 }
             }
@@ -153,7 +190,7 @@ impl Catalog {
         }
 
         if tfr {
-            let gui = decode(&root.join("interface/TFR_Super_Events.gui")).unwrap_or_default();
+            let gui = decode(&super::mod_layers::path(root, "interface/TFR_Super_Events.gui")).unwrap_or_default();
             let windows = blocks(&gui, "containerWindowType = {")
                 .into_iter()
                 .filter_map(|window| {
@@ -167,7 +204,7 @@ impl Catalog {
                 })
                 .collect::<HashMap<_, _>>();
             let gui =
-                decode(&root.join("common/scripted_guis/TFR_super_events.txt")).unwrap_or_default();
+                decode(&super::mod_layers::path(root, "common/scripted_guis/TFR_super_events.txt")).unwrap_or_default();
             for group in blocks(&gui, "scripted_gui = {") {
                 for (_, entry) in named_blocks(inner(&group)) {
                     let window = top_value(&entry, "window_name");
@@ -201,11 +238,18 @@ impl Catalog {
         }
         catalog.load_audio_assets(root, "music");
         catalog.load_audio_assets(root, "sound");
+        if root.file_name().is_some_and(|id| id == super::mod_layers::TFR_CHILD) {
+            let companion = root.with_file_name("3793754397");
+            if companion.is_dir() {
+                catalog.load_audio_assets(&companion, "music");
+                catalog.load_titles(&localisation_for(&companion, language, diagnostics));
+            }
+        }
         catalog.load_titles(loc);
         if tfr {
             // The reader has no in-game time machine window. Its closing cue
             // belongs to the decision that opens that window.
-            let gui = decode(&root.join("common/scripted_guis/TFR_scripted_guis_JAP.txt"))
+            let gui = decode(&super::mod_layers::path(root, "common/scripted_guis/TFR_scripted_guis_JAP.txt"))
                 .unwrap_or_default();
             for (_, window) in blocks(&gui, "scripted_gui = {")
                 .iter()
@@ -262,10 +306,7 @@ impl Catalog {
     }
 
     fn load_audio_assets(&mut self, root: &Path, directory: &str) {
-        for entry in WalkDir::new(root.join(directory))
-            .sort_by_file_name()
-            .into_iter()
-            .filter_map(Result::ok)
+        for entry in super::mod_layers::entries(root, directory)
             .filter(|entry| {
                 entry.file_type().is_file()
                     && entry
@@ -527,7 +568,9 @@ fn decode_dds(bytes: &mut [u8]) -> Option<image::DynamicImage> {
     }
     let height = u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?);
     let width = u32::from_le_bytes(bytes.get(16..20)?.try_into().ok()?);
-    if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
+    if (width, height) != TNO_NUCLEAR_SHEET
+        && (!(1..=8192).contains(&width) || !(1..=8192).contains(&height))
+    {
         return None;
     }
     let dds_u32 = |offset| Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?));
@@ -617,18 +660,64 @@ fn decode_scene_image(mod_path: &Path, image_path: &Path) -> Option<String> {
         return None;
     }
     let mut bytes = std::fs::read(path).ok()?;
-    let decoded = if bytes.starts_with(b"DDS ") {
+    let mut decoded = if bytes.starts_with(b"DDS ") {
         decode_dds(&mut bytes)?
     } else {
         image::load_from_memory(&bytes).ok()?
     };
-    let image = decoded.thumbnail(1600, 1000);
+    if image_path.file_name().is_some_and(|name| name.eq_ignore_ascii_case("nuclearwar.dds"))
+        && (decoded.width(), decoded.height()) == TNO_NUCLEAR_SHEET
+    {
+        decoded = decoded.crop_imm(0, 0, 573, 455);
+    }
+    // Sprite slices are measured in source pixels, so resize only oversized artwork.
+    let image = if decoded.width() > 1600 || decoded.height() > 1000 {
+        decoded.thumbnail(1600, 1000)
+    } else {
+        decoded
+    };
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).ok()?;
     Some(format!(
         "data:image/png;base64,{}",
         STANDARD.encode(png.into_inner())
     ))
+}
+
+#[derive(Serialize)]
+pub struct TnoSuperEventSkin {
+    frame: Option<String>,
+    title: Option<String>,
+    quote: Option<String>,
+    button: Option<String>,
+    nuclear_frame: Option<String>,
+    nuclear_title: Option<String>,
+    quote_font: Option<PathBuf>,
+}
+
+#[tauri::command]
+pub async fn load_tno_super_event_skin(mod_path: String) -> Option<TnoSuperEventSkin> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = Path::new(&mod_path);
+        super::mod_layers::file(root, "interface/TNO_SG_Super_Event.gui")?;
+        let layers = super::mod_layers::roots(root);
+        let image = |relative: &str| {
+            let path = super::mod_layers::file(root, relative)?;
+            layers.iter().rev().find_map(|layer| decode_scene_image(layer, &path))
+        };
+        Some(TnoSuperEventSkin {
+            frame: image("gfx/interface/tiles/tiled_window_bigevent_border.dds"),
+            title: image("gfx/interface/tiles/tiled_bg.dds"),
+            quote: image("gfx/interface/superevent_text_underlay.dds"),
+            button: image("gfx/interface/button_221x34.dds"),
+            nuclear_frame: image("gfx/interface/topbar/nuke_super_frame.dds"),
+            nuclear_title: image("gfx/interface/topbar/nuke_super_title.dds"),
+            quote_font: super::mod_layers::file(root, "gfx/fonts/BombardierTNOV6.otf"),
+        })
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[tauri::command]
@@ -708,7 +797,8 @@ pub(super) fn with_event_art(mut scene: Scene, event_art: Option<&PathBuf>) -> S
 #[tauri::command]
 pub async fn load_super_event_image(mod_path: String, image_path: String) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
-        decode_scene_image(Path::new(&mod_path), Path::new(&image_path))
+        super::mod_layers::roots(Path::new(&mod_path)).iter().rev()
+            .find_map(|root| decode_scene_image(root, Path::new(&image_path)))
     })
     .await
     .ok()

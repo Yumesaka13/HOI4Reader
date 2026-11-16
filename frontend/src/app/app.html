@@ -1,6 +1,6 @@
 <mat-sidenav-container class="shell" [attr.inert]="superEvent ? '' : null">
-  <mat-sidenav mode="side" [opened]="!immersiveReading" class="nav-drawer">
-    <div class="brand"><span class="brand-mark">H</span><span>HOI4Reader</span></div>
+  <mat-sidenav mode="side" [opened]="!immersiveReading && !compactNavigation()" class="nav-drawer">
+    <div class="brand"><img class="brand-mark" src="app-icon.png" alt="" /><span>HOI4Reader</span></div>
     <mat-nav-list>
       <a mat-list-item [class.nav-active]="page === 'home'" (click)="setPage('home')"
         ><mat-icon matListItemIcon>home</mat-icon><span matListItemTitle>{{ t('主页') }}</span></a
@@ -11,7 +11,7 @@
     </mat-nav-list>
     <div class="drawer-footer"><mat-icon>folder_open</mat-icon><span>{{ t('只读取本机游戏文件') }}</span></div>
   </mat-sidenav>
-  <mat-sidenav-content>
+  <mat-sidenav-content [class.compact-navigation]="compactNavigation() && !immersiveReading">
     <mat-toolbar *ngIf="page !== 'focus-choice'" class="topbar" [class.reader-topbar]="page === 'reader'"
       ><button
         mat-icon-button
@@ -27,14 +27,20 @@
             ? t('选择模组')
             : page === 'countries'
               ? t('选择国家')
+              : page === 'country-intro'
+                ? t('开局提示')
               : page === 'chapters'
                   ? t('国策章节')
                   : page === 'reader'
                     ? t('阅读')
-                    : t('设置')
+                    : page === 'search'
+                      ? t('文案搜索')
+                      : page === 'music'
+                        ? t('音乐回顾')
+                        : t('设置')
       }}</span
       ><span class="grow"></span>
-      <button
+      <button class="undo-route-button"
         mat-button
         *ngIf="
           canUndoRoute &&
@@ -56,7 +62,7 @@
         <p>这些国策的时间或分支仍缺少可用的排程依据。</p>
         <ul>
           <li *ngFor="let development of externalDevelopments">
-            {{ development.country }} · {{ development.focus.title }}
+            {{ development.country }} · <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: development.focus.title }"></ng-container>
           </li>
         </ul>
       </details>
@@ -76,20 +82,23 @@
             (click)="previewSuperEvent(scene)"
           >
             <mat-icon>{{ scene.audio ? 'music_note' : 'movie' }}</mat-icon
-            >{{ scene.title }}
+            ><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title }"></ng-container>
           </button>
         </div>
       </details>
     </ng-template>
     <main class="content" [class.reading-content]="page === 'reader'" [class.focus-picker-content]="page === 'focus-choice'">
       <div class="error-banner" *ngIf="error"><mat-icon>error_outline</mat-icon>{{ error }}</div>
+      <p class="index-cache-warning" *ngIf="cacheWarning" role="status">
+        {{ t('应用目录的索引缓存不可用，本次仍可继续阅读。') }} {{ cacheWarning }}
+      </p>
       <section *ngIf="page === 'home'" class="home-page">
-        <div class="tfr-menu-art" *ngIf="saved.theme === 'tfr'" aria-hidden="true">
+        <div class="tfr-menu-art" *ngIf="theme === 'tfr'" aria-hidden="true">
           <img *ngIf="tfrMenuArt" [src]="tfrMenuArt" alt="" />
         </div>
         <header class="page-heading">
-          <p class="eyebrow" *ngIf="saved.theme === 'material'">HEARTS OF IRON IV · STORY READER</p>
-          <h1>{{ saved.theme === 'tfr' ? 'THE FIRE RISES' : t('继续你的故事') }}</h1>
+          <p class="eyebrow" *ngIf="theme === 'material'">HEARTS OF IRON IV · STORY READER</p>
+          <h1>{{ theme === 'tfr' ? 'THE FIRE RISES' : theme === 'tno' ? 'THE NEW ORDER' : t('继续你的故事') }}</h1>
           <p>{{ t('按国家浏览国策、事件、决议与国际新闻，继续上次读到的剧情。') }}</p>
         </header>
         <mat-card
@@ -99,7 +108,7 @@
         >
           <mat-card-header
             ><div mat-card-avatar class="resume-avatar"><mat-icon>auto_stories</mat-icon></div>
-            <mat-card-title>{{ lastStory?.title || lastChapter?.title || t('继续阅读') }}</mat-card-title
+            <mat-card-title><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: lastStory?.title || lastChapter?.title || t('继续阅读') }"></ng-container></mat-card-title
             ><mat-card-subtitle
               >{{ selectedMod?.name || saved.last_mod || saved.mod_path }} ·
               {{ selectedCountry?.name || saved.last_country || saved.tag }}</mat-card-subtitle
@@ -107,12 +116,10 @@
           >
           <mat-card-content
             ><p>
-              {{
-                lastStory?.description ||
+              <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: lastStory?.description ||
                   lastStory?.timing ||
                   lastChapter?.description ||
-                  '继续上次的故事阅读。'
-              }}
+                  '继续上次的故事阅读。' }"></ng-container>
             </p></mat-card-content
           >
           <mat-card-actions align="end"
@@ -128,13 +135,17 @@
             <mat-card-content
               ><p class="eyebrow">{{ t('从这里开始') }}</p>
               <h2>{{ t('把国策读成故事') }}</h2>
-              <p>{{ t('选择一个已安装的创意工坊模组，再选国家和章节。阅读进度会保存在这台设备上。') }}</p>
+              <p>{{ t(android ? '导入模组 ZIP 后即可选择国家并开始阅读。' : '选择一个已安装的创意工坊模组，再选国家和章节。阅读进度会保存在这台设备上。') }}</p>
               <button mat-flat-button (click)="setPage('mods')">
                 <mat-icon>library_books</mat-icon>{{ t('浏览已安装模组') }}
               </button></mat-card-content
             ></mat-card
           ></ng-template
         >
+        <div class="library-actions">
+          <button mat-stroked-button (click)="openSearch()"><mat-icon>search</mat-icon>{{ t('文案搜索') }}</button>
+          <button mat-stroked-button (click)="setPage('music')"><mat-icon>library_music</mat-icon>{{ t('音乐回顾') }}</button>
+        </div>
         <div class="home-stats">
           <mat-card appearance="filled"
             ><mat-icon>extension</mat-icon><strong>{{ mods.length }}</strong
@@ -148,6 +159,52 @@
           >
         </div>
       </section>
+      <section *ngIf="page === 'search'" class="library-page">
+        <header class="page-heading">
+          <h1>{{ t('文案搜索') }}</h1>
+          <p *ngIf="selectedMod">{{ selectedMod.name }}</p>
+        </header>
+        <ng-container *ngIf="selectedMod; else noSearchMod">
+          <mat-form-field appearance="outline" class="library-search">
+            <mat-label>{{ t('搜索标题、正文或选项') }}</mat-label>
+            <mat-icon matPrefix>search</mat-icon>
+            <input matInput [(ngModel)]="searchQuery" (ngModelChange)="updateSearch()" type="search" />
+          </mat-form-field>
+          <p *ngIf="loading" class="library-status" role="status">{{ t('正在索引模组剧情。可以先搜索或选择国家。') }}</p>
+          <ng-container *ngIf="!loading && searchQuery.trim()">
+            <p class="library-status" role="status">{{ t('找到 {0} 条文案', searchCount) }}</p>
+            <div class="library-results">
+              @for (result of searchResults; track result.item) {
+                <button type="button" class="library-result" mat-stroked-button (click)="previewSearchResult(result)">
+                  <span class="library-result-text">
+                    <span class="library-result-label">{{ t(kindLabel($any(result.item).kind || 'focus')) }}</span>
+                    <strong><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: result.item.title }"></ng-container></strong>
+                    <span *ngIf="result.excerpt">{{ result.excerpt }}</span>
+                  </span>
+                </button>
+              }
+              <button *ngIf="searchCount > searchResults.length" mat-button (click)="showMoreSearchResults()">{{ t('显示更多结果') }}</button>
+            </div>
+          </ng-container>
+        </ng-container>
+        <ng-template #noSearchMod>
+          <button mat-flat-button (click)="setPage('mods')">{{ t('选择模组') }}</button>
+        </ng-template>
+      </section>
+      <section *ngIf="page === 'music'" class="library-page">
+        <header class="page-heading"><h1>{{ t('音乐回顾') }}</h1></header>
+        <p *ngIf="!musicHistory.length">{{ t('阅读时播放过的音乐会出现在这里。') }}</p>
+        <div class="library-results">
+          @for (track of musicHistory; track track.path) {
+            <button type="button" class="library-result" mat-stroked-button
+              [attr.aria-pressed]="isPlayingTrack(track)" (click)="replayTrack(track)">
+              <mat-icon>{{ isPlayingTrack(track) ? 'stop' : 'play_arrow' }}</mat-icon>
+              <span class="library-result-text"><strong>{{ track.title }}</strong><span *ngIf="track.mod">{{ track.mod }}</span></span>
+            </button>
+          }
+        </div>
+        <p *ngIf="audioStatus" class="library-status" role="status">{{ t(audioStatus) }}</p>
+      </section>
       <section *ngIf="page === 'mods'">
         <header class="page-heading">
           <p class="eyebrow">LIBRARY</p>
@@ -158,10 +215,32 @@
           <mat-form-field appearance="outline"
             ><mat-label>{{ t('搜索模组') }}</mat-label><mat-icon matPrefix>search</mat-icon
             ><input matInput [(ngModel)]="query" [placeholder]="t('输入模组名称')" /></mat-form-field
-          ><button mat-stroked-button (click)="refreshMods()">
+          ><button *ngIf="!android" mat-stroked-button (click)="refreshMods()">
             <mat-icon>refresh</mat-icon>{{ t('重新扫描') }}
           </button>
+          <ng-container *ngIf="android" [ngTemplateOutlet]="archiveImport"></ng-container>
+          <button *ngIf="android" mat-stroked-button [disabled]="importingArchive"
+            (click)="showDownloadForm = !showDownloadForm" [attr.aria-expanded]="showDownloadForm">
+            <mat-icon>download</mat-icon>{{ t('下载模组') }}
+          </button>
         </div>
+        <form *ngIf="android && showDownloadForm" class="download-form" (ngSubmit)="downloadArchive()">
+          <p>{{ t('输入受信任来源提供的 HTTPS 模组 ZIP 直链。下载完成后会自动导入。') }}</p>
+          <mat-form-field appearance="outline">
+            <mat-label>{{ t('HTTPS ZIP 下载地址') }}</mat-label>
+            <input matInput type="url" name="url" [(ngModel)]="downloadUrl" [readonly]="importingArchive"
+              placeholder="https://" required autocomplete="off" />
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="importingArchive || !downloadUrl.trim()">
+            {{ t('下载并导入') }}
+          </button>
+        </form>
+        <p *ngIf="downloadProgress as progress" class="import-status" role="status">
+          <mat-spinner diameter="20"></mat-spinner>
+          {{ progress.installing ? t('正在解压并导入模组…') : progress.total
+            ? t('已下载 {0} / {1} MB', (progress.received / 1000000 | number:'1.0-1') || '0', (progress.total / 1000000 | number:'1.0-1') || '0')
+            : t('已下载 {0} MB', (progress.received / 1000000 | number:'1.0-1') || '0') }}
+        </p>
         <div *ngIf="loading" class="loading"><mat-spinner diameter="36"></mat-spinner></div>
         <div class="mod-grid" *ngIf="!loading">
           <mat-card
@@ -181,23 +260,32 @@
               <span>WORKSHOP · {{ mod.workshop_id }}</span>
             </div>
             <mat-card-content class="mod-card-content">
+              <p *ngIf="mod.parent_name">{{ t('本体 · {0}', mod.parent_name) }}</p>
               <h2>{{ mod.name }}</h2>
               <button mat-button>{{ t('选择模组') }}<mat-icon>chevron_right</mat-icon></button>
             </mat-card-content>
           </mat-card>
         </div>
-        <div class="empty-state" *ngIf="!loading && !mods.length">
+        <div class="empty-state" *ngIf="!loading && !importingArchive && !mods.length">
           <mat-icon>folder_off</mat-icon>
           <h2>{{ t('没有找到 TFR 或 TNO') }}</h2>
-          <p>{{ t('检查 Steam 创意工坊是否已下载这两个模组，或在设置中指定正确的 Workshop 根目录。') }}</p>
-          <button mat-flat-button (click)="setPage('settings')">{{ t('打开设置') }}</button>
+          <p>{{ t(android ? '导入模组 ZIP 后即可选择国家并开始阅读。' : '检查 Steam 创意工坊是否已下载这两个模组，或在设置中指定正确的 Workshop 根目录。') }}</p>
+          <button *ngIf="!android" mat-flat-button (click)="setPage('settings')">{{ t('打开设置') }}</button>
         </div>
       </section>
       <section *ngIf="page === 'countries'">
         <header class="page-heading">
           <p class="eyebrow">{{ selectedMod?.name }}</p>
           <h1>{{ t('选择国家') }}</h1>
-          <p>{{ t('识别到 {0} 个国家。国家内容包含国策、事件与决议。', countries.length) }}</p>
+          <p *ngIf="!countryIndexPending">
+            {{ offersSecondaryCountries && listedCountries === countries
+              ? t('已索引 {0} 个主要国家。', countries.length)
+              : t('识别到 {0} 个国家。国家内容包含国策、事件与决议。', listedCountries.length) }}
+          </p>
+          <div *ngIf="countryIndexPending" class="country-scan-status" role="status">
+            <mat-spinner diameter="20" aria-hidden="true"></mat-spinner>
+            {{ t(pendingCountryTag ? '已选择国家，剧情索引完成后会自动进入。' : '正在索引模组剧情。可以先搜索或选择国家。') }}
+          </div>
         </header>
         <div class="country-toolbar">
           <mat-form-field appearance="outline"
@@ -206,43 +294,71 @@
               matInput
               [(ngModel)]="countryQuery"
               [placeholder]="t('例如：日本、JAP')" /></mat-form-field
-          ><mat-slide-toggle [(ngModel)]="showAllCountries">{{ t('显示所有国家') }}</mat-slide-toggle>
+          ><mat-slide-toggle
+            *ngIf="offersSecondaryCountries || !countryIndexPending"
+            [checked]="showAllCountries"
+            (change)="setShowAllCountries($event.checked)">{{ t(offersSecondaryCountries ? '显示次要国家' : '显示所有国家') }}</mat-slide-toggle>
         </div>
+        <p class="country-scan-status" *ngIf="secondaryIndexPending && showAllCountries" role="status">
+          <mat-spinner diameter="20" aria-hidden="true"></mat-spinner>{{ t('正在补充次要国家的索引。') }}
+        </p>
+        @let matches = visibleCountries;
         <div class="country-grid">
-          <mat-card
-            appearance="outlined"
-            class="country-card"
-            *ngFor="let country of visibleCountries"
-            (click)="chooseCountry(country)"
-            ><mat-card-content
-              ><div class="country-emblem">
-                <img
-                  *ngIf="country.flag_image"
-                  class="country-flag-image"
-                  [src]="country.flag_image"
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span class="country-flag">{{ country.tag }}</span>
-              </div>
-              <div class="country-name">{{ country.name }}</div>
-              <div class="country-meta">
-                {{ t('{0} 个国策 · {1} 个事件/决议', country.chapter_count, country.story_count) }}
-              </div></mat-card-content
-            ><mat-icon class="card-arrow">arrow_forward</mat-icon></mat-card
-          >
+          @for (country of matches; track country.tag) {
+            <mat-card
+              appearance="outlined"
+              class="country-card"
+              [class.country-pending]="pendingCountryTag === country.tag"
+              role="button"
+              tabindex="0"
+              (keydown.enter)="chooseCountry(country)"
+              (keydown.space)="$event.preventDefault(); chooseCountry(country)"
+              (click)="chooseCountry(country)"
+              ><mat-card-content
+                ><div class="country-emblem">
+                  <img
+                    *ngIf="country.flag_image"
+                    class="country-flag-image"
+                    [src]="country.flag_image"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <span class="country-flag">{{ country.tag }}</span>
+                </div>
+                <div class="country-name">{{ country.name }}</div>
+                <div class="country-meta" *ngIf="!countryIndexPending">
+                  {{ t('{0} 个国策 · {1} 个事件/决议', country.chapter_count, country.story_count) }}
+                </div></mat-card-content
+              ><mat-icon class="card-arrow">arrow_forward</mat-icon></mat-card
+            >
+          }
         </div>
-        <div class="empty-state" *ngIf="!loading && !countries.length">
+        <div class="empty-state" *ngIf="!countryIndexPending && !countries.length">
           <mat-icon>public_off</mat-icon>
           <h2>{{ t('没有读取到国家名称') }}</h2>
           <p>{{ t('请确认模组目录含有对应语言的 localisation 文件。') }}</p>
         </div>
-        <div class="empty-state" *ngIf="!loading && countries.length && !visibleCountries.length">
+        <div class="empty-state" *ngIf="listedCountries.length && !matches.length">
           <mat-icon>search_off</mat-icon>
           <h2>{{ t('没有匹配的国家') }}</h2>
-          <p>{{ t('尝试更短的搜索词，或开启“显示所有国家”。') }}</p>
+          <p>{{ t(offersSecondaryCountries ? '尝试更短的搜索词，或开启“显示次要国家”。' : '尝试更短的搜索词，或开启“显示所有国家”。') }}</p>
         </div>
+      </section>
+      <section *ngIf="page === 'country-intro'" class="country-intro" aria-labelledby="opening-heading">
+        <header class="page-heading">
+          <p class="eyebrow">{{ selectedMod?.name }}</p>
+          <h1 id="opening-heading">{{ selectedCountry?.name }}</h1>
+        </header>
+        <mat-card appearance="outlined" class="country-intro-card" *ngFor="let note of countryOpeningNotes">
+          <mat-card-content>
+            <p class="story-copy" *ngIf="note.text"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: note.text }"></ng-container></p>
+            <img *ngFor="let image of note.images" class="country-intro-illustration" [src]="imageSource(image)" alt="" />
+          </mat-card-content>
+        </mat-card>
+        <button mat-flat-button (click)="startCountryReading()">
+          {{ t('开始阅读') }}<mat-icon iconPositionEnd>arrow_forward</mat-icon>
+        </button>
       </section>
       <section
         *ngIf="page === 'focus-choice'"
@@ -277,7 +393,7 @@
                     <mat-icon>account_tree</mat-icon>
                   }
                 </span>
-                <span class="focus-choice-title" [id]="'focus-title-' + choice.focus.id">{{ choice.focus.title }}</span>
+                <span class="focus-choice-title" [id]="'focus-title-' + choice.focus.id"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: choice.focus.title }"></ng-container></span>
                 @if (choice.exclusiveWith.length) {
                   <span class="focus-choice-branch" [id]="'focus-exclusive-' + choice.focus.id">
                     <mat-icon aria-hidden="true">alt_route</mat-icon>
@@ -285,7 +401,7 @@
                   </span>
                 }
                 <span class="focus-choice-description" [id]="'focus-description-' + choice.focus.id">
-                  {{ choice.focus.description || t('此国策没有对应语言的描述文本。') }}
+                  <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: choice.focus.description || t('此国策没有对应语言的描述文本。') }"></ng-container>
                 </span>
               </button>
             }
@@ -317,8 +433,8 @@
               }}<small>当前待读 · {{ kindLabel(item.kind) }}<ng-container *ngIf="isProjectedStory(item)"> · 推演</ng-container></small>
             </div>
             <div class="timeline-copy">
-              <h3>{{ item.title }}</h3>
-              <p>{{ item.description || item.start_timing || item.timing }}</p>
+              <h3><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.title }"></ng-container></h3>
+              <p><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.description || item.start_timing || item.timing }"></ng-container></p>
               <small *ngIf="dueStories.length > 1"
                 >后面还有 {{ dueStories.length - 1 }} 条已到期剧情</small
               >
@@ -342,7 +458,7 @@
             <p>{{ t('之后的已知事件') }}</p>
             <div class="upcoming-row" *ngFor="let item of upcomingStories">
               <span>{{ calendarLabel(storyDay(item)) }}<small *ngIf="isProjectedStory(item)"> · 推演</small></span>
-              <span>{{ item.title }}</span>
+              <span><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.title }"></ng-container></span>
               <mat-chip>{{ kindLabel(item.kind) }}</mat-chip>
             </div>
           </div>
@@ -428,8 +544,8 @@
                   <mat-chip>{{ kindLabel(item.kind) }}</mat-chip>
                   <mat-chip *ngIf="item.kind === 'news'">{{ t('国际') }}</mat-chip>
                 </div>
-                <h3>{{ item.title }}</h3>
-                <p>{{ item.description || item.timing }}</p>
+                <h3><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.title }"></ng-container></h3>
+                <p><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.description || item.timing }"></ng-container></p>
               </div>
               <img
                 class="timeline-image"
@@ -461,8 +577,8 @@
                 <div class="timeline-labels">
                   <mat-chip>{{ kindLabel(item.kind) }}</mat-chip>
                 </div>
-                <h3>{{ item.title }}</h3>
-                <p>{{ item.description || item.timing }}</p>
+                <h3><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.title }"></ng-container></h3>
+                <p><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: item.description || item.timing }"></ng-container></p>
               </div>
               <mat-icon>chevron_right</mat-icon>
             </mat-card>
@@ -472,7 +588,7 @@
       </section>
       <section *ngIf="page === 'reader' && current" class="reader-page" aria-labelledby="reader-heading">
         <article class="reader-article" [class.tfr-news]="currentIsTimeline && $any(current).kind === 'news'" [attr.lang]="readerLanguage">
-          <div class="tfr-news-tab" *ngIf="saved.theme === 'tfr' && currentIsTimeline && $any(current).kind === 'news'">
+          <div class="tfr-news-tab" *ngIf="theme === 'tfr' && currentIsTimeline && $any(current).kind === 'news'">
             <mat-icon aria-hidden="true">language</mat-icon>{{ t('国际新闻') }}
           </div>
           <header class="reader-heading">
@@ -481,45 +597,64 @@
               <ng-template #focusImagePlaceholder><mat-icon aria-hidden="true">account_tree</mat-icon></ng-template>
             </div>
             <p class="reader-date" *ngIf="readerDate as date">{{ date }}<span *ngIf="readerDateIsProjected"> · 推演</span></p>
-            <h1 id="reader-heading" tabindex="-1">{{ currentStoryTitle }}</h1>
+            <h1 id="reader-heading" tabindex="-1"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: currentStoryTitle || current.title }"></ng-container></h1>
           </header>
 
           <figure class="story-image" *ngIf="currentIsTimeline && image">
-            <img [src]="image" [alt]="currentStoryTitle || current.title" />
+            <img [src]="image" [alt]="plainGameText(currentStoryTitle || current.title)" />
           </figure>
 
-          <p class="story-copy">{{ currentStoryDescription || t('缺少此章节的正文译文。') }}</p>
+          <p class="story-copy"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: currentStoryDescription || t('缺少此章节的正文译文。') }"></ng-container></p>
 
           <p class="reader-note" *ngIf="storyPreview">{{ t('剧情线索预览') }}</p>
+          <ul *ngIf="searchPreviewOptions.length">
+            <li *ngFor="let option of searchPreviewOptions">
+              <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: option.text }"></ng-container>
+            </li>
+          </ul>
           <section class="story-options" *ngIf="!storyPreview && currentConfirmation as confirmation">
             <ng-container *ngIf="confirmation.wartime; else singleOutcome">
               <mat-checkbox *ngFor="let choice of confirmation.choices; let index = index"
-                [checked]="wartimeChoices.has(index)" (change)="setWartimeChoice(index, $event.checked)">{{ choice.label }}</mat-checkbox>
+                [checked]="wartimeChoices.has(index)" (change)="setWartimeChoice(index, $event.checked)">
+                <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: choice.label }"></ng-container>
+              </mat-checkbox>
               <button mat-flat-button (click)="resolveWartimeChoices()">{{ t('继续阅读') }}</button>
             </ng-container>
             <ng-template #singleOutcome>
               <h2>{{ t('选择剧情结果') }}</h2>
               <button mat-stroked-button class="story-option"
-                *ngFor="let choice of confirmation.choices; let index = index" (click)="resolveConfirmation(index)">{{ choice.label }}</button>
+                *ngFor="let choice of confirmation.choices; let index = index" (click)="resolveConfirmation(index)">
+                <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: choice.label }"></ng-container>
+              </button>
             </ng-template>
           </section>
           <section class="story-options" *ngIf="!storyPreview && currentMissionChoices.length">
             <h2>{{ currentForeignMission ? t('选择战事结果') : t('确认任务结果') }}</h2>
             <button mat-stroked-button class="story-option"
               *ngFor="let choice of currentMissionChoices" (click)="resolveMission(choice.id)">
-              {{ choice.label }}
+              <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: choice.label }"></ng-container>
             </button>
           </section>
           <section class="story-options" *ngIf="currentCredits.length">
             <h2>{{ t('制作组寄语') }}</h2>
             <p class="story-copy" *ngFor="let credit of currentCredits">{{ credit }}</p>
           </section>
-          <section class="story-options" *ngIf="!storyPreview && currentOptions.length && !selectedOption">
-            <h2>{{ t('选择剧情分支') }}</h2>
-            <button mat-stroked-button class="story-option"
-              *ngFor="let option of currentOptions" (click)="chooseStoryOption(option)">
-              {{ option.text }}
-            </button>
+          <section class="story-options" *ngIf="!storyPreview && currentOptions.length">
+            <h2 *ngIf="currentOptions.length > 1">{{ t(hasStoryBranches ? '选择剧情分支' : '选择回应') }}</h2>
+            <ng-container *ngFor="let option of currentOptions">
+              <button mat-stroked-button class="story-option" (click)="chooseStoryOption(option)"
+                (pointermove)="showEffectTooltip($event, option)" (pointerenter)="showEffectTooltip($event, option)"
+                (pointerleave)="effectTooltip = null" (focusin)="showEffectTooltip($event, option)" (focusout)="effectTooltip = null"
+                [attr.aria-label]="plainGameText(option.text)" [attr.aria-description]="plainGameText(optionTooltip(option)) || null">
+                <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: option.text }"></ng-container>
+              </button>
+              @if (touchEffects() && optionTooltip(option); as effects) {
+                <details class="touch-effects">
+                  <summary>{{ t('查看游戏效果') }}</summary>
+                  <div><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: effects }"></ng-container></div>
+                </details>
+              }
+            </ng-container>
           </section>
           <section class="story-options reader-decisions" *ngIf="!storyPreview && readerDecisions.length">
             <h2>{{ t('可采取的决议') }}</h2>
@@ -527,7 +662,7 @@
             <mat-checkbox *ngFor="let decision of readerDecisions"
               [checked]="isDecisionChecked(decision.id)"
               (change)="toggleReaderDecision(decision.id, $event.checked)">
-              {{ decision.title }}
+              <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: decision.title }"></ng-container>
             </mat-checkbox>
           </section>
           <section class="story-options" *ngIf="!storyPreview && readerLinks.length">
@@ -535,15 +670,17 @@
             <p class="reader-note" *ngIf="branchMessage">{{ branchMessage }}</p>
             <button mat-stroked-button class="story-option"
               *ngFor="let story of readerLinks" (click)="followStory(story)">
-              {{ story.title }}
+              <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: story.title }"></ng-container>
             </button>
           </section>
         </article>
 
         <div class="reader-actions"
-          *ngIf="!storyPreview && !currentConfirmation && !currentMissionChoices.length && (!currentOptions.length || selectedOption)">
+          *ngIf="!storyPreview && !currentConfirmation && !currentMissionChoices.length && !hasStoryBranches">
           <button mat-mini-fab (click)="continueRoute()" [attr.aria-label]="continuationLabel"
-            [title]="continuationLabel">
+            [title]="optionTooltip(currentOptions[0]) ? null : continuationLabel"
+            (pointermove)="showEffectTooltip($event, currentOptions[0])" (pointerenter)="showEffectTooltip($event, currentOptions[0])"
+            (pointerleave)="effectTooltip = null" (focusin)="showEffectTooltip($event, currentOptions[0])" (focusout)="effectTooltip = null">
             <mat-icon>arrow_forward</mat-icon>
           </button>
         </div>
@@ -565,10 +702,11 @@
           ><mat-card-header
             ><mat-card-title>{{ t('游戏与模组目录') }}</mat-card-title
             ><mat-card-subtitle
-              >{{ t('启动时会自动探测 Steam 库；也可以指定目录。') }}</mat-card-subtitle
+              >{{ t(android ? '每个 ZIP 放一个模组或附加包，并保留 descriptor.mod。也可以导入 HOI4 游戏目录的 ZIP。' : '启动时会自动探测 Steam 库；也可以指定目录。') }}</mat-card-subtitle
             ></mat-card-header
           ><mat-card-content
-            ><div class="path-row">
+            ><ng-container *ngIf="android" [ngTemplateOutlet]="archiveImport"></ng-container>
+            <div class="path-row" *ngIf="!android">
               <mat-form-field appearance="outline"
                 ><mat-label>{{ t('HOI4 游戏目录') }}</mat-label
                 ><input matInput [(ngModel)]="saved.game_path" /></mat-form-field
@@ -576,7 +714,7 @@
                 <mat-icon>folder_open</mat-icon>{{ t('浏览') }}
               </button>
             </div>
-            <div class="path-row">
+            <div class="path-row" *ngIf="!android">
               <mat-form-field appearance="outline"
                 ><mat-label>{{ t('Workshop 根目录') }}</mat-label
                 ><input matInput [(ngModel)]="saved.workshop_path" /></mat-form-field
@@ -584,7 +722,7 @@
                 <mat-icon>folder_open</mat-icon>{{ t('浏览') }}
               </button>
             </div>
-            <div class="path-row">
+            <div class="path-row" *ngIf="!android">
               <mat-form-field appearance="outline"
                 ><mat-label>{{ t('当前模组目录（可选）') }}</mat-label
                 ><input matInput [(ngModel)]="saved.mod_path" /></mat-form-field
@@ -616,8 +754,10 @@
             <mat-form-field appearance="outline">
               <mat-label>{{ t('界面主题') }}</mat-label>
               <mat-select [value]="saved.theme" (selectionChange)="setTheme($event.value)">
+                <mat-option value="auto">{{ t('跟随上一次游玩的模组') }}</mat-option>
                 <mat-option value="material">Material Design</mat-option>
                 <mat-option value="tfr">The Fire Rises</mat-option>
+                <mat-option value="tno">The New Order</mat-option>
               </mat-select>
             </mat-form-field>
           </mat-card-content>
@@ -642,35 +782,95 @@
         </div>
       </section>
     </main>
+    <nav class="mobile-nav" *ngIf="compactNavigation() && !immersiveReading">
+      <button mat-button [class.nav-active]="page === 'home'" [attr.aria-current]="page === 'home' ? 'page' : null" (click)="setPage('home')">
+        <mat-icon>home</mat-icon>{{ t('主页') }}
+      </button>
+      <button mat-button [class.nav-active]="page === 'settings'" [attr.aria-current]="page === 'settings' ? 'page' : null" (click)="setPage('settings')">
+        <mat-icon>settings</mat-icon>{{ t('设置') }}
+      </button>
+    </nav>
   </mat-sidenav-content>
 </mat-sidenav-container>
+
+<ng-template #archiveImport>
+  <button mat-stroked-button [disabled]="importingArchive || loading" (click)="importArchive()">
+    <mat-icon>file_open</mat-icon>{{ t('导入 ZIP') }}
+  </button>
+  <span *ngIf="importingArchive && !downloadProgress" class="import-status" role="status">
+    <mat-spinner diameter="20"></mat-spinner>{{ t('正在导入 ZIP，所需时间视文件大小而定。') }}
+  </span>
+</ng-template>
+
+<ng-template #gameMarkup let-text>
+  @for (token of gameText(text); track $index) {
+    @if (token.icon && inlineImage(token.icon); as image) {
+      <img class="inline-game-icon" [class.inline-game-flag]="token.flag" [src]="image" [alt]="token.text" />
+    } @else {
+      <span [style.--game-text-color]="token.color" [class.game-text-colored]="token.color" [class.inline-flag-tag]="token.flag">{{ token.text }}</span>
+    }
+  }
+</ng-template>
+@if (effectTooltip; as tooltip) {
+  <div class="story-effect-tooltip" role="tooltip" [style.left.px]="tooltip.x" [style.top.px]="tooltip.y"
+    [class.tooltip-left]="tooltip.left" [class.tooltip-above]="tooltip.above">
+    <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: tooltip.text }"></ng-container>
+  </div>
+}
 
 <section
   *ngIf="superEvent as scene"
   class="super-event-overlay"
+  [class.tno-super-event-overlay]="theme === 'tno'"
   cdkTrapFocus
   role="dialog"
   aria-modal="true"
   aria-labelledby="super-event-title"
   (keydown.escape)="closeSuperEvent()"
 >
-  <mat-card appearance="outlined" class="super-event-card" [class.tfr-super-event-native-frame]="superEventSkin?.frame">
+  <div *ngIf="theme === 'tno'; else standardSuperEvent" class="tno-super-event">
+    <div class="tno-super-event-panel"
+      [class.tno-super-event-native-frame]="tnoSuperEventSkin?.frame || (tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_frame)"
+      [style.--tno-frame]="tnoSuperEventSkin?.frame ? 'url(' + tnoSuperEventSkin?.frame + ')' : null"
+      [style.--tno-title]="tnoSuperEventSkin?.title ? 'url(' + tnoSuperEventSkin?.title + ')' : null"
+      [style.--tno-quote]="tnoSuperEventSkin?.quote ? 'url(' + tnoSuperEventSkin?.quote + ')' : null"
+      [style.--tno-button]="tnoSuperEventSkin?.button ? 'url(' + tnoSuperEventSkin?.button + ')' : null">
+      <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_title" class="tno-super-event-nuclear-title"
+        [src]="tnoSuperEventSkin?.nuclear_title" alt="" />
+      <h1 id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title }"></ng-container></h1>
+      <img *ngIf="superEventImage" class="tno-super-event-picture"
+        [src]="superEventImage" [alt]="plainGameText(scene.title)" (error)="onSuperEventImageError()" />
+      <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_frame; else tnoFrame"
+        class="tno-super-event-nuclear-frame" [src]="tnoSuperEventSkin?.nuclear_frame" alt="" />
+      <ng-template #tnoFrame><div class="tno-super-event-frame" aria-hidden="true"></div></ng-template>
+      <div *ngIf="scene.quote" class="tno-super-event-quote-underlay" aria-hidden="true"></div>
+      <blockquote *ngIf="scene.quote" tabindex="0">
+        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.quote }"></ng-container>
+      </blockquote>
+      <button mat-button id="super-event-continue" (click)="closeSuperEvent()">
+        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.dismiss || t('继续阅读') }"></ng-container>
+      </button>
+    </div>
+    <p *ngIf="superEventImageUnavailable" class="tno-super-event-status">{{ t('无法显示本机原图') }}</p>
+    <ng-container *ngTemplateOutlet="superEventAudioStatus"></ng-container>
+  </div>
+  <ng-template #standardSuperEvent><mat-card appearance="outlined" class="super-event-card" [class.tfr-super-event-native-frame]="superEventSkin?.frame">
     <div class="super-event-art" *ngIf="superEventImage">
       <img [src]="superEventImage" [alt]="scene.title" (error)="onSuperEventImageError()" />
     </div>
     <img class="tfr-super-event-frame" *ngIf="superEventSkin?.frame as frame" [src]="frame" alt="" />
     <mat-card-content class="super-event-copy">
-      <h1 id="super-event-title">{{ scene.title }}</h1>
-      <blockquote *ngIf="scene.quote">{{ scene.quote }}</blockquote>
+      <h1 id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title }"></ng-container></h1>
+      <blockquote *ngIf="scene.quote"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.quote }"></ng-container></blockquote>
       <p class="super-event-art-status" *ngIf="superEventImageUnavailable">{{ t('无法显示本机原图') }}</p>
       <ng-container *ngTemplateOutlet="superEventAudioStatus"></ng-container>
       <button mat-flat-button id="super-event-continue" (click)="closeSuperEvent()"
         [style.background-image]="superEventSkin?.button ? 'url(' + superEventSkin?.button + ')' : null">
-        {{ scene.dismiss || t('继续阅读') }}
-        <mat-icon *ngIf="saved.theme !== 'tfr'" iconPositionEnd>arrow_forward</mat-icon>
+        <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.dismiss || t('继续阅读') }"></ng-container>
+        <mat-icon *ngIf="theme !== 'tfr'" iconPositionEnd>arrow_forward</mat-icon>
       </button>
     </mat-card-content>
-  </mat-card>
+  </mat-card></ng-template>
 </section>
 <div class="bgm-notification" aria-live="polite">
   <div *ngFor="let title of bgmNotice ? [bgmNotice] : []" class="bgm-toast">
