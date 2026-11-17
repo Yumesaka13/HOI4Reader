@@ -44,3 +44,7 @@ Zip one Workshop mod folder per archive and keep its `descriptor.mod` at the ZIP
 **Download mod** on the Android mod selection page accepts a direct HTTPS URL to an importable ZIP. The app downloads it into private storage and imports it in the same library. For publisher pages and other archive formats, obtain the mod from its source and ZIP the extracted mod folder. [TFR on ModDB](https://www.moddb.com/mods/the-fire-rises) · [TNO on Nexus Mods](https://www.nexusmods.com/heartsofironiv/mods/34)
 
 The app reads game and mod files from your local library. The bundled fonts include [Fusion Pixel](frontend/public/fonts/OFL.txt) and [Aldrich](frontend/public/fonts/OFL-Aldrich.txt).
+
+## License
+
+HOI4Reader's own code is licensed under the [GNU General Public License v3.0 only](LICENSE). Third-party assets and dependencies retain their respective licenses.

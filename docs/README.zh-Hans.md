@@ -24,3 +24,7 @@
 把模组分别压成 ZIP，保留每个模组的 `descriptor.mod`，传到手机后在模组选择页点**导入 ZIP**。本体、子模组、TNO 汉化包和 TFR 音乐包分别导入。也可单独导入 HOI4 游戏目录的 ZIP，供模组补用原版资源。导入文件和索引保存在应用专属目录里。
 
 已有模组 ZIP 的 HTTPS 直链时，可在模组选择页点**下载模组**，下载完成会自动导入。发布页或 RAR 压缩包可先在浏览器获取、解压并压成 ZIP。 [TFR 发布页](https://www.moddb.com/mods/the-fire-rises) · [TNO 发布页](https://www.nexusmods.com/heartsofironiv/mods/34)
+
+## 许可证
+
+HOI4Reader 的自有代码采用 [GNU 通用公共许可证第 3 版（GPL-3.0-only）](../LICENSE)。第三方资源和依赖仍适用各自的许可证。

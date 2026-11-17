@@ -14,3 +14,7 @@
 **The Fire Rises（烈焰升騰）** 是目前閱讀流程最完整的模組。The New Order 可掃描，路線支援較有限。部分遊戲腳本條件仍待解析。
 
 從原始碼執行需安裝 Node.js、Rust 與 [Tauri 系統依賴](https://v2.tauri.app/start/prerequisites/)。在專案目錄執行 `npm ci`、`npm --prefix frontend ci`、`npm run tauri:dev`。使用 `npm run tauri:build` 建置安裝程式。
+
+## 授權
+
+HOI4Reader 的自有程式碼採用 [GNU 通用公眾授權條款第 3 版（GPL-3.0-only）](../LICENSE)。第三方資源與相依套件仍適用各自的授權條款。

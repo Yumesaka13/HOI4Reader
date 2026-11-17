@@ -14,3 +14,7 @@ Hearts of Iron IV の MOD 向けストーリーリーダーです。国を選び
 **The Fire Rises（TFR）** が主な対応 MOD です。The New Order も検出・索引化できますが、ルートの対応範囲は限られています。一部のスクリプト条件は解析対象外です。
 
 ソースから起動するには Node.js、Rust、[Tauri の動作要件](https://v2.tauri.app/start/prerequisites/) が必要です。プロジェクトで `npm ci`、`npm --prefix frontend ci`、`npm run tauri:dev` を実行します。パッケージは `npm run tauri:build` で作成できます。
+
+## ライセンス
+
+HOI4Reader の独自コードは [GNU General Public License バージョン 3 のみ（GPL-3.0-only）](../LICENSE) で公開されています。サードパーティの素材と依存ライブラリには、それぞれのライセンスが適用されます。
