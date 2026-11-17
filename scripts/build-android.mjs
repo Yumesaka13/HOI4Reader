@@ -8,7 +8,13 @@ const result = spawnSync(process.execPath, [
   ...(targets.length ? targets : ['aarch64']),
 ], {
   stdio: 'inherit',
-  env: { ...process.env, CARGO_PROFILE_DEV_OPT_LEVEL: '2', CARGO_PROFILE_DEV_DEBUG: '0' },
+  env: {
+    ...process.env,
+    // Android's WebView can be older than the browsers targeted by Angular's default.
+    BROWSERSLIST: 'Chrome >= 109',
+    CARGO_PROFILE_DEV_OPT_LEVEL: '2',
+    CARGO_PROFILE_DEV_DEBUG: '0',
+  },
 });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

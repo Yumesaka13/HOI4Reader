@@ -8,6 +8,13 @@
     <link rel="icon" type="image/png" href="app-icon.png" />
   </head>
   <body>
+    <section id="startup-status" role="status" style="padding:24px;font:16px/1.5 system-ui,sans-serif">
+      <strong>HOI4Reader</strong>
+      <p id="startup-message">正在启动… / Starting…</p>
+      <p id="startup-details" style="overflow-wrap:anywhere" hidden></p>
+      <button id="startup-retry" type="button" hidden>重试 / Retry</button>
+    </section>
     <app-root></app-root>
+    <script src="startup.js"></script>
   </body>
 </html>

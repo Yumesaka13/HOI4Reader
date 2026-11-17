@@ -3,4 +3,8 @@ import { appConfig } from './app/app.config';
 import { App } from './app/app';
 
 bootstrapApplication(App, appConfig)
-  .catch((err) => console.error(err));
+  .then(() => document.getElementById('startup-status')?.remove())
+  .catch((error: unknown) => {
+    console.error(error);
+    window.dispatchEvent(new CustomEvent('hoi4reader:startup-error', { detail: String(error) }));
+  });
