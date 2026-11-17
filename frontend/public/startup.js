@@ -1,5 +1,27 @@
 (function () {
   // Keep this script readable by WebViews that cannot load the application's module.
+  if (!Object.hasOwn) {
+    Object.defineProperty(Object, 'hasOwn', {
+      configurable: true,
+      writable: true,
+      value: function (object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
+      }
+    });
+  }
+  if (!Array.prototype.at) {
+    Object.defineProperty(Array.prototype, 'at', {
+      configurable: true,
+      writable: true,
+      value: function (index) {
+        index = +index || 0;
+        index = index < 0 ? Math.ceil(index) : Math.floor(index);
+        if (index < 0) index += this.length;
+        return index >= 0 && index < this.length ? this[index] : undefined;
+      }
+    });
+  }
+
   var status = document.getElementById('startup-status');
   var message = document.getElementById('startup-message');
   var details = document.getElementById('startup-details');
@@ -22,7 +44,10 @@
   }
 
   window.addEventListener('error', function (event) {
-    if (event.message) showFailure(event.message);
+    if (event.message) {
+      var file = event.filename && event.filename.split('/').pop();
+      showFailure(event.message + (file && event.lineno ? ' (' + file + ':' + event.lineno + ')' : ''));
+    }
     else if (event.target && event.target.tagName === 'SCRIPT') {
       showFailure('无法加载界面脚本 / Could not load the app script');
     }

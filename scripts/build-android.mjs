@@ -11,7 +11,7 @@ const result = spawnSync(process.execPath, [
   env: {
     ...process.env,
     // Android's WebView can be older than the browsers targeted by Angular's default.
-    BROWSERSLIST: 'Chrome >= 109',
+    BROWSERSLIST: 'Chrome 83',
     CARGO_PROFILE_DEV_OPT_LEVEL: '2',
     CARGO_PROFILE_DEV_DEBUG: '0',
   },

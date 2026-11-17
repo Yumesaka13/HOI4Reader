@@ -2739,7 +2739,7 @@ export class App implements OnInit {
         const sprite = this.inlineAssets[name] ?? this.inlineAssets[`gfx_${name}`];
         const tag = /^(?:gfx_)?flag_([a-z0-9]{3})$/.exec(name)?.[1]?.toUpperCase();
         if (!sprite && tag) tokens.push({ text: tag, color, icon: `flag:${tag}`, flag: true });
-        else tokens.push({ text: match[2].replace(/^GFX_/i, '').replaceAll('_', ' '), color, icon: sprite });
+        else tokens.push({ text: match[2].replace(/^GFX_/i, '').replace(/_/g, ' '), color, icon: sprite });
       } else if (match[3] || match[4]) {
         const raw = (match[3] || match[4]).toUpperCase();
         const tag = raw === 'ROOT' || raw === 'THIS' ? this.saved.tag : raw;

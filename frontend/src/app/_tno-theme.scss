@@ -228,3 +228,42 @@ html[data-reader-theme='tno'] {
 @media (pointer: coarse) {
   .tno-super-event-panel #super-event-continue { min-height: 44px; }
 }
+
+@supports not (width: 1cqw) {
+  .tno-super-event {
+    width: min(100%, 540px);
+  }
+
+  .tno-super-event-panel {
+    padding: 12px;
+    border: 1px solid #596368;
+  }
+
+  .tno-super-event-panel::before,
+  .tno-super-event-frame,
+  .tno-super-event-nuclear-title,
+  .tno-super-event-nuclear-frame,
+  .tno-super-event-quote-underlay {
+    display: none;
+  }
+
+  .tno-super-event-panel h1,
+  .tno-super-event-panel blockquote,
+  .tno-super-event-panel #super-event-continue {
+    position: static;
+    font-size: 1rem;
+  }
+
+  .tno-super-event-picture {
+    position: static;
+    width: 100%;
+    height: auto;
+    max-height: 50vh;
+    margin: 12px 0;
+  }
+
+  .tno-super-event-panel #super-event-continue {
+    width: auto;
+    transform: none;
+  }
+}
