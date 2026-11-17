@@ -167,7 +167,7 @@ describe('App', () => {
     }
   });
 
-  it('uses the Chinese TNO title and quote glyphs while preserving the original text', async () => {
+  it('shows TNO text only after its Chinese font is ready and reuses the decoded glyphs', async () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     fixture.detectChanges();
@@ -177,16 +177,22 @@ describe('App', () => {
     app.saved.language = 'simp_chinese';
     app.selectedMod = { name: 'The New Order', path: '/tno', workshop_id: '2438003901' };
     const glyph = { image: 'data:image/png;base64,test', width: 1, height: 1, left: 0, bottom: 0, advance: 1 };
+    const fonts = { title: { '战': glyph }, quote: { '和': glyph } };
+    let deliverGlyphs!: (glyphs: typeof fonts) => void;
+    const pendingGlyphs = new Promise<typeof fonts>((resolve) => { deliverGlyphs = resolve; });
     const backend = vi.fn((command: string) => command === 'load_tno_super_event_glyphs'
-      ? { title: { '战': glyph }, quote: { '和': glyph } }
+      ? pendingGlyphs
       : null);
     mockIPC(backend);
     try {
-      app.previewSuperEvent({ id: 'test', title: 'TNO战', quote: '§G和§!平',
-        dismiss: '和', image_path: null, audio: null });
+      const scene = { id: 'test', title: 'TNO战', quote: '§G和§!平', dismiss: '和', image_path: null, audio: null };
+      app.previewSuperEvent(scene);
+      fixture.detectChanges();
+      const panel = fixture.nativeElement.querySelector('.tno-super-event-panel') as HTMLElement;
+      expect(panel.querySelector('h1, blockquote, button')).toBeNull();
+      deliverGlyphs(fonts);
       await vi.waitFor(() => {
         fixture.detectChanges();
-        const panel = fixture.nativeElement.querySelector('.tno-super-event-panel') as HTMLElement;
         const title = panel.querySelector('h1');
         const quote = panel.querySelector('blockquote');
         expect(title?.textContent).toBe('TNO战');
@@ -198,6 +204,10 @@ describe('App', () => {
       expect(backend).toHaveBeenCalledWith('load_tno_super_event_glyphs', {
         modPath: '/tno', title: 'TNO战', quoteAndButton: '和平\n和',
       });
+      app.closeSuperEvent();
+      app.previewSuperEvent(scene);
+      await vi.waitFor(() => expect(app.tnoSuperEventTextReady).toBe(true));
+      expect(backend.mock.calls.filter(([command]) => command === 'load_tno_super_event_glyphs')).toHaveLength(1);
     } finally {
       clearMocks();
       delete document.documentElement.dataset['readerTheme'];

@@ -526,6 +526,7 @@ export class App implements OnInit {
   superEventSkin: TfrSuperEventSkin | null = null;
   tnoSuperEventSkin: TnoSuperEventSkin | null = null;
   tnoSuperEventGlyphs: TnoSuperEventGlyphs | null = null;
+  tnoSuperEventTextReady = false;
   bgmNotice = '';
   audioStatus = '';
   audioNeedsGesture = false;
@@ -533,6 +534,7 @@ export class App implements OnInit {
   private superEventTrigger: HTMLElement | null = null;
   private readonly tfrSuperEventSkins = new Map<string, Promise<TfrSuperEventSkin | null>>();
   private readonly tnoSuperEventSkins = new Map<string, Promise<TnoSuperEventSkin | null>>();
+  private readonly tnoGlyphRequests = new Map<string, Promise<TnoSuperEventGlyphs | null>>();
   private readonly audioQueue: SuperEventTrack[] = [];
   private playingAudio: HTMLAudioElement | null = null;
   private playingTrack: SuperEventTrack | null = null;
@@ -551,9 +553,10 @@ export class App implements OnInit {
     this.superEventSkin = null;
     this.tnoSuperEventSkin = null;
     this.tnoSuperEventGlyphs = null;
+    this.tnoSuperEventTextReady = false;
     this.superEventContinuation = continuation ?? null;
     this.changeDetector.markForCheck();
-    setTimeout(() => document.getElementById('super-event-continue')?.focus(), 0);
+    this.focusSuperEvent(scene);
     if (this.theme === 'tfr') void this.loadTfrSuperEventSkin(scene);
     if (this.theme === 'tno') void this.loadTnoSuperEventSkin(scene);
     if (scene.image_path && this.selectedMod) {
@@ -605,29 +608,69 @@ export class App implements OnInit {
     return this.superEvent?.id === 'SE_NUCLEAR_WAR';
   }
 
+  private focusSuperEvent(scene: SuperEvent) {
+    setTimeout(() => {
+      if (this.superEvent !== scene) return;
+      const focusId = this.theme === 'tno' && !this.tnoSuperEventTextReady
+        ? 'super-event-dialog' : 'super-event-continue';
+      document.getElementById(focusId)?.focus();
+    }, 0);
+  }
+
   private async loadTnoSuperEventSkin(scene: SuperEvent) {
     const selected = this.selectedMod;
     const path = selected && this.themeForMod(selected.workshop_id, selected.name) === 'tno'
       ? selected.path
       : this.mods.find((mod) => mod.workshop_id === '2438003901')?.path ?? selected?.path;
-    if (!path) return;
+    const [skin, glyphs] = path ? await Promise.all([
+      this.requestTnoSuperEventSkin(path),
+      this.requestTnoSuperEventGlyphs(path, scene),
+    ]) : [null, null];
+    if (this.superEvent !== scene) return;
+    this.tnoSuperEventSkin = skin;
+    this.tnoSuperEventGlyphs = glyphs;
+    this.tnoSuperEventTextReady = true;
+    this.changeDetector.markForCheck();
+    this.focusSuperEvent(scene);
+  }
+
+  private requestTnoSuperEventGlyphs(path: string, scene: SuperEvent) {
     const title = this.plainGameText(scene.title);
     const quoteAndButton = this.plainGameText(`${scene.quote ?? ''}\n${scene.dismiss || this.t('继续阅读')}`);
-    if (this.readerLanguage !== 'ja' && /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/u.test(title + quoteAndButton)) {
-      void invoke<TnoSuperEventGlyphs>('load_tno_super_event_glyphs', { modPath: path, title, quoteAndButton })
-        .then((glyphs) => {
-          if (this.superEvent !== scene) return;
-          this.tnoSuperEventGlyphs = glyphs;
-          this.changeDetector.markForCheck();
-        }).catch(() => {});
+    if (this.readerLanguage === 'ja' || !/[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/u.test(title + quoteAndButton)) {
+      return null;
     }
+    const key = JSON.stringify([path, title, quoteAndButton]);
+    let request = this.tnoGlyphRequests.get(key);
+    if (request) return request;
+    if (this.tnoGlyphRequests.size >= 16) this.tnoGlyphRequests.clear();
+    request = invoke<TnoSuperEventGlyphs>('load_tno_super_event_glyphs', { modPath: path, title, quoteAndButton })
+      .then(async (glyphs) => {
+        await Promise.all([glyphs.title, glyphs.quote].flatMap((font) =>
+          Object.entries(font).map(async ([character, glyph]) => {
+            const image = new Image();
+            if (typeof image.decode !== 'function') return;
+            image.src = glyph.image;
+            await image.decode().catch(() => { delete font[character]; });
+          }),
+        ));
+        return glyphs;
+      }).catch(() => {
+        this.tnoGlyphRequests.delete(key);
+        return null;
+      });
+    this.tnoGlyphRequests.set(key, request);
+    return request;
+  }
+
+  private requestTnoSuperEventSkin(path: string) {
     let request = this.tnoSuperEventSkins.get(path);
     if (!request) {
       request = invoke<TnoSuperEventSkin | null>('load_tno_super_event_skin', { modPath: path })
-        .then((skin) => {
+        .then(async (skin) => {
           if (skin?.quote_font && typeof FontFace !== 'undefined') {
             const font = new FontFace('TNO Super Event Quote', `url(${JSON.stringify(convertFileSrc(skin.quote_font))})`);
-            void font.load().then((loaded) => document.fonts.add(loaded)).catch(() => {});
+            await font.load().then((loaded) => document.fonts.add(loaded)).catch(() => {});
           }
           return skin;
         }).catch(() => {
@@ -636,11 +679,7 @@ export class App implements OnInit {
         });
       this.tnoSuperEventSkins.set(path, request);
     }
-    const skin = await request;
-    if (this.superEvent === scene) {
-      this.tnoSuperEventSkin = skin;
-      this.changeDetector.markForCheck();
-    }
+    return request;
   }
 
   closeSuperEvent() {

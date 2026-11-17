@@ -802,10 +802,16 @@ fn load_tno_glyph_page(
                 {
                     return None;
                 }
+                // Give high-DPI displays more samples without smoothing the original pixels.
+                let bitmap = sheet.crop_imm(x, y, width, height).resize_exact(
+                    width * 3,
+                    height * 3,
+                    image::imageops::FilterType::Nearest,
+                );
                 Some((
                     glyph,
                     TnoGlyph {
-                        image: png_data_url(&sheet.crop_imm(x, y, width, height))?,
+                        image: png_data_url(&bitmap)?,
                         advance: metric("xadvance")? as f32 / size,
                         width: width as f32 / size,
                         height: height as f32 / size,

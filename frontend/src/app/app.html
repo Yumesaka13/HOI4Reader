@@ -833,12 +833,16 @@
 
 <section
   *ngIf="superEvent as scene"
+  id="super-event-dialog"
   class="super-event-overlay"
   [class.tno-super-event-overlay]="theme === 'tno'"
   cdkTrapFocus
   role="dialog"
+  tabindex="-1"
   aria-modal="true"
-  aria-labelledby="super-event-title"
+  [attr.aria-labelledby]="theme !== 'tno' || tnoSuperEventTextReady ? 'super-event-title' : null"
+  [attr.aria-label]="theme === 'tno' && !tnoSuperEventTextReady ? t('超事件') : null"
+  [attr.aria-busy]="theme === 'tno' && !tnoSuperEventTextReady ? 'true' : null"
   (keydown.escape)="closeSuperEvent()"
 >
   <div *ngIf="theme === 'tno'; else standardSuperEvent" class="tno-super-event">
@@ -850,17 +854,17 @@
       [style.--tno-button]="tnoSuperEventSkin?.button ? 'url(' + tnoSuperEventSkin?.button + ')' : null">
       <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_title" class="tno-super-event-nuclear-title"
         [src]="tnoSuperEventSkin?.nuclear_title" alt="" />
-      <h1 id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title, bitmap: tnoSuperEventGlyphs?.title }"></ng-container></h1>
+      <h1 *ngIf="tnoSuperEventTextReady" id="super-event-title"><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.title, bitmap: tnoSuperEventGlyphs?.title }"></ng-container></h1>
       <img *ngIf="superEventImage" class="tno-super-event-picture"
         [src]="superEventImage" [alt]="plainGameText(scene.title)" (error)="onSuperEventImageError()" />
       <img *ngIf="tnoNuclearSuperEvent && tnoSuperEventSkin?.nuclear_frame; else tnoFrame"
         class="tno-super-event-nuclear-frame" [src]="tnoSuperEventSkin?.nuclear_frame" alt="" />
       <ng-template #tnoFrame><div class="tno-super-event-frame" aria-hidden="true"></div></ng-template>
       <div *ngIf="scene.quote" class="tno-super-event-quote-underlay" aria-hidden="true"></div>
-      <blockquote *ngIf="scene.quote" tabindex="0">
+      <blockquote *ngIf="scene.quote && tnoSuperEventTextReady" tabindex="0">
         <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.quote, bitmap: tnoSuperEventGlyphs?.quote }"></ng-container>
       </blockquote>
-      <button mat-button id="super-event-continue" (click)="closeSuperEvent()">
+      <button *ngIf="tnoSuperEventTextReady" mat-button id="super-event-continue" (click)="closeSuperEvent()">
         <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: scene.dismiss || t('继续阅读'), bitmap: tnoSuperEventGlyphs?.quote }"></ng-container>
       </button>
     </div>
