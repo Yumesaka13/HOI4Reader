@@ -641,20 +641,18 @@
           </section>
           <section class="story-options" *ngIf="!storyPreview && currentOptions.length">
             <h2 *ngIf="currentOptions.length > 1">{{ t(hasStoryBranches ? '选择剧情分支' : '选择回应') }}</h2>
-            <ng-container *ngFor="let option of currentOptions">
+            <div class="story-option-row" *ngFor="let option of currentOptions">
               <button mat-stroked-button class="story-option" (click)="chooseStoryOption(option)"
                 (pointermove)="showEffectTooltip($event, option)" (pointerenter)="showEffectTooltip($event, option)"
                 (pointerleave)="effectTooltip = null" (focusin)="showEffectTooltip($event, option)" (focusout)="effectTooltip = null"
-                [attr.aria-label]="plainGameText(option.text)" [attr.aria-description]="plainGameText(optionTooltip(option)) || null">
+                [attr.aria-label]="plainGameText(option.text)"
+                [attr.aria-description]="showTouchEffects ? null : plainGameText(optionTooltip(option)) || null">
                 <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: option.text }"></ng-container>
               </button>
-              @if (touchEffects() && optionTooltip(option); as effects) {
-                <details class="touch-effects">
-                  <summary>{{ t('查看游戏效果') }}</summary>
-                  <div><ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: effects }"></ng-container></div>
-                </details>
+              @if (showTouchEffects && optionTooltip(option)) {
+                <ng-container *ngTemplateOutlet="effectButton; context: { $implicit: option }"></ng-container>
               }
-            </ng-container>
+            </div>
           </section>
           <section class="story-options reader-decisions" *ngIf="!storyPreview && readerDecisions.length">
             <h2>{{ t('可采取的决议') }}</h2>
@@ -677,6 +675,9 @@
 
         <div class="reader-actions"
           *ngIf="!storyPreview && !currentConfirmation && !currentMissionChoices.length && !hasStoryBranches">
+          @if (showTouchEffects && optionTooltip(currentOptions[0])) {
+            <ng-container *ngTemplateOutlet="effectButton; context: { $implicit: currentOptions[0] }"></ng-container>
+          }
           <button mat-mini-fab (click)="continueRoute()" [attr.aria-label]="continuationLabel"
             [title]="optionTooltip(currentOptions[0]) ? null : continuationLabel"
             (pointermove)="showEffectTooltip($event, currentOptions[0])" (pointerenter)="showEffectTooltip($event, currentOptions[0])"
@@ -830,6 +831,29 @@
     <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: tooltip.text }"></ng-container>
   </div>
 }
+
+<ng-template #effectButton let-option>
+  <button mat-icon-button class="story-effect-button" type="button" aria-haspopup="dialog"
+    [attr.aria-label]="t('查看游戏效果') + ' · ' + plainGameText(option.text)"
+    (click)="openOptionEffects(option, effectsPanel)">
+    <mat-icon aria-hidden="true">info_outline</mat-icon>
+  </button>
+</ng-template>
+
+<ng-template #effectsPanel let-data>
+  <div class="story-effect-panel-header">
+    <h2>{{ t('查看游戏效果') }}</h2>
+    <button mat-icon-button type="button" [attr.aria-label]="t('关闭')" (click)="closeOptionEffects()">
+      <mat-icon aria-hidden="true">close</mat-icon>
+    </button>
+  </div>
+  <p class="story-effect-choice">
+    <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: data.choice }"></ng-container>
+  </p>
+  <div class="story-effect-copy">
+    <ng-container *ngTemplateOutlet="gameMarkup; context: { $implicit: data.effects }"></ng-container>
+  </div>
+</ng-template>
 
 <section
   *ngIf="superEvent as scene"

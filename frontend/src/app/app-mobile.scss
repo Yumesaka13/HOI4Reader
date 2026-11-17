@@ -1,15 +1,28 @@
-.touch-effects {
+.story-effect-button {
+  flex: none;
+  min-width: 48px;
+  min-height: 48px;
+  color: var(--primary);
+  background: var(--surface-container-high);
+}
+.story-effect-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.story-effect-panel-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.story-effect-choice {
+  margin: 4px 0 12px;
   color: var(--on-surface-variant);
-  font-size: 14px;
+  overflow-wrap: anywhere;
 }
-.touch-effects summary {
-  min-height: 44px;
-  align-content: center;
-  cursor: pointer;
-}
-.touch-effects div {
-  padding: 8px 12px;
-  background: var(--surface-container);
+.story-effect-copy {
+  border-block-start: 1px solid var(--outline-variant);
+  padding-block: 12px;
   white-space: pre-line;
   overflow-wrap: anywhere;
 }

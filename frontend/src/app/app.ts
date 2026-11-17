@@ -1,6 +1,6 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { BreakpointObserver } from '@angular/cdk/layout';
-import { ChangeDetectorRef, Component, HostListener, inject, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, inject, OnInit, TemplateRef } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { projectForeignFocuses } from './foreign-focus-calendar';
@@ -22,6 +22,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatBottomSheet, MatBottomSheetModule, MatBottomSheetRef } from '@angular/material/bottom-sheet';
 import { map } from 'rxjs';
 
 type Page = 'home' | 'mods' | 'countries' | 'country-intro' | 'chapters' | 'focus-choice' | 'reader' | 'settings' | 'music' | 'search';
@@ -462,6 +463,7 @@ const emptySaved: Saved = {
     MatChipsModule,
     MatCheckboxModule,
     MatSlideToggleModule,
+    MatBottomSheetModule,
   ],
   templateUrl: './app.html',
   styleUrls: ['./app.scss', './focus-picker.scss', './app-mobile.scss', './library.scss'],
@@ -471,6 +473,8 @@ export class App implements OnInit {
   readonly compactNavigation = toSignal(this.breakpoints.observe('(max-width: 760px)').pipe(map((state) => state.matches)));
   readonly touchEffects = toSignal(this.breakpoints.observe('(hover: none)').pipe(map((state) => state.matches)));
   readonly android = /Android/i.test(navigator.userAgent);
+  private readonly bottomSheet = inject(MatBottomSheet);
+  private optionEffectsSheet?: MatBottomSheetRef<unknown>;
   importingArchive = false;
   showDownloadForm = false;
   downloadUrl = '';
@@ -2659,9 +2663,33 @@ export class App implements OnInit {
     return lines.join('\n');
   }
 
+  get showTouchEffects() {
+    return this.android || this.touchEffects();
+  }
+
+  openOptionEffects(option: StoryOption | undefined, template: TemplateRef<unknown>) {
+    const effects = this.optionTooltip(option);
+    if (!option || !effects) return;
+    this.effectTooltip = null;
+    const sheet = this.bottomSheet.open(template, {
+      data: { choice: option.text, effects },
+      ariaLabel: this.t('查看游戏效果'),
+      autoFocus: 'dialog',
+      closeOnNavigation: false,
+    });
+    this.optionEffectsSheet = sheet;
+    sheet.afterDismissed().subscribe(() => {
+      if (this.optionEffectsSheet === sheet) this.optionEffectsSheet = undefined;
+    });
+  }
+
+  closeOptionEffects() {
+    this.optionEffectsSheet?.dismiss();
+  }
+
   showEffectTooltip(event: MouseEvent | FocusEvent, option: StoryOption | undefined) {
     if (this.touchEffects() || ('pointerType' in event && event.pointerType === 'touch')) return;
-    if (!(event instanceof MouseEvent) && this.effectTooltip) return;
+    if (!(event instanceof MouseEvent) && (this.effectTooltip || this.android)) return;
     const text = this.optionTooltip(option);
     if (!text) return;
     const element = event.currentTarget as HTMLElement;
@@ -4653,6 +4681,7 @@ export class App implements OnInit {
 
   setPage(page: Page) {
     this.effectTooltip = null;
+    this.closeOptionEffects();
     this.changeDetector.markForCheck();
     if (page !== 'countries') this.pendingCountryTag = null;
     if (page === 'home') void this.loadTfrMenuArt();
@@ -4678,7 +4707,10 @@ export class App implements OnInit {
   @HostListener('window:popstate')
   onAndroidBack() {
     if (!this.android || this.page === 'home') return;
-    if (this.superEvent) {
+    if (this.optionEffectsSheet) {
+      this.closeOptionEffects();
+      this.updateAndroidHistory();
+    } else if (this.superEvent) {
       this.closeSuperEvent();
       this.updateAndroidHistory();
     } else {

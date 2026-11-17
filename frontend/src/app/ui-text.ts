@@ -19,6 +19,7 @@ export const UI_TEXT: Readonly<Record<string, readonly [string, string, string]>
   '导入模组 ZIP 后即可选择国家并开始阅读。': ['Import a mod ZIP to choose a country and start reading.', '匯入模組 ZIP 後即可選擇國家並開始閱讀。', 'MOD の ZIP をインポートすると、国を選んで読み始められます。'],
   '每个 ZIP 放一个模组或附加包，并保留 descriptor.mod。也可以导入 HOI4 游戏目录的 ZIP。': ['Put one mod or add-on in each ZIP and keep descriptor.mod. You can also import a ZIP of the HOI4 game folder.', '每個 ZIP 放一個模組或附加套件，並保留 descriptor.mod。也可以匯入 HOI4 遊戲目錄的 ZIP。', 'ZIP ごとに MOD またはアドオンを一つ入れ、descriptor.mod を残してください。HOI4 のゲームフォルダーを ZIP にしてインポートすることもできます。'],
   '查看游戏效果': ['View game effects', '查看遊戲效果', 'ゲーム内の効果を見る'],
+  '关闭': ['Close', '關閉', '閉じる'],
   '本体 · {0}': ['Base mod · {0}', '本體 · {0}', '本体 MOD · {0}'],
   '开局提示': ['Opening notes', '開局提示', '開始時のヒント'],
   '开始阅读': ['Start reading', '開始閱讀', '読み始める'],

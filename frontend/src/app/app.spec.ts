@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import type { Channel } from '@tauri-apps/api/core';
 import { clearMocks, mockConvertFileSrc, mockIPC } from '@tauri-apps/api/mocks';
 import { App } from './app';
@@ -28,6 +29,51 @@ describe('App', () => {
     const tokens = app.gameText(app.effectTooltip!.text);
     expect(tokens).toContainEqual({ text: 'JAP', flag: true, icon: 'flag:JAP', color: undefined });
     expect(tokens).toContainEqual({ text: '+1', color: '#51cc73' });
+  });
+
+  it('opens option effects on Android without applying the option or leaving the page on Back', async () => {
+    TestBed.overrideProvider(MATERIAL_ANIMATIONS, { useValue: { animationsDisabled: true } });
+    const userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Android test WebView');
+    const pushHistory = vi.spyOn(history, 'pushState').mockImplementation(() => {});
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.ngOnInit = async () => {};
+    app.page = 'reader';
+    app.current = {
+      id: 'sample.effects', kind: 'event', country_tag: 'JAP', title: 'A letter',
+      description: 'The story continues.', date: null, timing: '', source: 'events/sample.txt',
+      image_path: null, start_day: null, start_timing: null, next_ids: [], linked_from: [],
+      options: [{ id: 'sample.effects.a', text: 'File the letter', next_ids: [],
+        effect_preview: { lines: [{ text: '@JAP §G+1§!', context: [] }, { text: 'Second line', context: [] }],
+          incomplete: true } }],
+    };
+    const choose = vi.spyOn(app, 'chooseStoryOption').mockResolvedValue(undefined);
+    const back = vi.spyOn(app, 'back');
+    try {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.story-option-row .story-effect-button')).toBeTruthy();
+      const shortcut = fixture.nativeElement.querySelector('.reader-actions .story-effect-button') as HTMLButtonElement;
+      shortcut.click();
+      await vi.waitFor(() => {
+        const effects = document.querySelector('.story-effect-copy');
+        expect(effects?.querySelector('.game-text-colored')?.textContent).toBe('+1');
+        expect(effects?.querySelector('.inline-flag-tag')?.textContent).toBe('JAP');
+        expect(effects?.textContent).toContain('Second line');
+        expect(effects?.textContent).toContain('Some effects require the live game state.');
+      });
+      expect(choose).not.toHaveBeenCalled();
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        expect(document.querySelector('.story-effect-copy')).toBeNull();
+      });
+      expect(app.page).toBe('reader');
+      expect(back).not.toHaveBeenCalled();
+    } finally {
+      fixture.destroy();
+      userAgent.mockRestore();
+      pushHistory.mockRestore();
+    }
   });
 
   it('shows searchable countries during indexing, opens the selected country once, and reuses the result', async () => {

@@ -680,7 +680,19 @@ mat-nav-list a.nav-active mat-icon {
   white-space: normal;
   text-align: left;
 }
+.story-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.story-option-row .story-option {
+  flex: 1;
+  min-width: 0;
+}
 .reader-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   position: fixed;
   z-index: 2;
   inset-inline-end: clamp(16px, 3vw, 48px);
